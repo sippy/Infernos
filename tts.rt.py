@@ -1,26 +1,13 @@
 from transformers import SpeechT5Processor, SpeechT5HifiGanConfig, SpeechT5HifiGan
-#from HIFIGanVocoder import HIFIGanVocoder
 from datasets import load_dataset
 import intel_extension_for_pytorch as ipex
 import torch
 import soundfile as sf
 import os.path
 import numpy as np
-from waveglow_vocoder import WaveGlowVocoder
 import torchaudio.transforms as T
 
 from HelloSippyTTSRT.HelloSippyRT import HelloSippyRT as SpeechT5ForTextToSpeech
-
-def load_PWG(device):
-    from parallel_wavegan.utils import download_pretrained_model
-    from parallel_wavegan.utils import load_model
-    import yaml
-
-    download_pretrained_model("arctic_slt_parallel_wavegan.v1")
-    vocoder_conf = "ParallelWaveGAN/egs/arctic/voc1/conf/parallel_wavegan.v1.yaml"
-    with open(vocoder_conf) as f:
-        config = yaml.load(f, Loader=yaml.Loader)
-    return load_model(".cache/parallel_wavegan/arctic_slt_parallel_wavegan.v1/checkpoint-400000steps.pkl", config).to(device)
 
 import queue
 import threading
@@ -196,8 +183,6 @@ class TTS():
     model = ipex.optimize(model)
     embeddings_dataset = load_dataset("Matthijs/cmu-arctic-xvectors", split="validation")
     _vc_conf = SpeechT5HifiGanConfig()
-    #_vc_conf.padding = 0
-    #vocoder = SpeechT5HifiGan.from_pretrained("microsoft/speecht5_hifigan", config = _vc_conf).to(model.device)
     vocoder = SpeechT5HifiGan(config = _vc_conf).to(model.device)
     checkpoint_path = 'cp_hifigan.test'
     cp_g = scan_checkpoint(checkpoint_path, 'g_')
@@ -209,11 +194,6 @@ class TTS():
     vocoder.eval()
     vocoder = ipex.optimize(vocoder)
 
-#    vocoder = load_PWG(model.device)
-#    vocoder = torch.hub.load('descriptinc/melgan-neurips', 'load_melgan')
-#    vocoder = WaveGlowVocoder()
-#    vocoder = HIFIGanVocoder(device = model.device)
-#    vocoder = torch.hub.load("bshall/hifigan:main", "hifigan_hubert_soft", map_location=torch.device(model.device))
     speaker_embeddings = torch.tensor(embeddings_dataset[7306]["xvector"]).unsqueeze(0).to(model.device)
 
     def dotts(self, text, ofname):
