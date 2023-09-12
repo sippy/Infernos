@@ -94,12 +94,12 @@ def _generate_speech_rt(
             _s = _s.squeeze(0)
             if vocoder is not None:
                 #_s = _s.permute(1, 0).unsqueeze(0)
-                print(_s.shape, _s.device)
+                #print(_s.shape, _s.device)
                 _s = torch.cat((pfs, _s), dim=0)
                 outputs = vocoder(_s)
-                print(outputs.size())
+                #print(outputs.size())
                 outputs = outputs[pf_trim:]
-                print(_s.shape, outputs.shape)
+                #print(_s.shape, outputs.shape)
                 pfs = _s[-model.pre_frames:, :]
             else:
                 outputs = _s
