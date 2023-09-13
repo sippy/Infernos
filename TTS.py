@@ -18,6 +18,10 @@ import numpy as np
 import torch.nn.functional as F
 import torch.nn as nn
 
+from rtpsynth.RtpSynth import RtpSynth
+
+import audioop
+
 def get_LPF(fs = 16000, cutoff = 4000.0):
     def butter_lowpass(cutoff, fs, order=5):
         nyquist = 0.5 * fs
@@ -66,17 +70,44 @@ def get_PBF(fs = 16000, l_cut = 75.0, h_cut = 4000.0):
     filter_kernel = torch.tensor(coeffs, dtype=torch.float32).view(1, 1, -1).to('xpu')
     return filter_kernel
 
+def numpy_audioop_helper(x, xdtype, func, width, ydtype):
+    '''helper function for using audioop buffer conversion in numpy'''
+    xi = np.asanyarray(x).astype(xdtype)
+    if np.any(x != xi):
+        xinfo = np.iinfo(xdtype)
+        raise ValueError("input must be %s [%d..%d]" % (xdtype, xinfo.min, xinfo.max))
+    y = np.frombuffer(func(xi.tobytes(), width), dtype=ydtype)
+    return y.reshape(xi.shape)
+
+def audioop_ulaw_compress(x):
+    return numpy_audioop_helper(x, np.int16, audioop.lin2ulaw, 2, np.uint8)
+
+class TTSSMarkerGeneric():
+    pass
+
+class TTSSMarkerNewSent(TTSSMarkerGeneric):
+    pass
+
+class TTSSMarkerEnd(TTSSMarkerGeneric):
+    pass
+
+
+TSO_SESSEND = None
+
 class TTSSoundOutput():
     pre_frames = 2
     _frame_size = 256
     debug = False
-    ofname: str
-    data = None
+    dl_ofname: str
+    data_log = None
     o_flt = None
     num_mel_bins = None
 
-    def __init__(self, ofname, num_mel_bins, device, vocoder = None, filter_out=False):
-        self.ofname = ofname
+    def __init__(self, num_mel_bins, device, vocoder=None, filter_out=False,
+                 dl_ofname=None, pkt_send_f=None):
+        self.itime = monotonic()
+        self.dl_ofname = dl_ofname
+        self.pkt_send_f = pkt_send_f
         self.vocoder = vocoder
         self.num_mel_bins = num_mel_bins
         self.device = device
@@ -91,18 +122,24 @@ class TTSSoundOutput():
         self.worker_thread.start()
 
     def soundout(self, chunk):
-        assert chunk is None or chunk.size(0) > 0
-        if self.debug and chunk is not None:
+        #print(f'soundout: {monotonic():4.3f}')
+        #return (0, False)
+        ismark = isinstance(chunk, TTSSMarkerGeneric)
+        iseos = isinstance(chunk, TTSSMarkerEnd)
+        assert ismark or chunk.size(0) > 0
+        if self.debug and not ismark:
             print(f'len(chunk) = {len(chunk)}')
         self.data_queue.put(chunk)
-        if chunk is None:
+        if iseos:
             self.worker_thread.join()
         return (self.data_queue.qsize(), False)
 
     def consume_audio(self):
+        itime = self.itime
         stime = ctime = None
         out_sr = 8000
         out_ft = 30
+        out_pt = 0 # G.711u
         out_fsize = int(out_sr * out_ft / 1000)
         ptime = 0.0
         if self.vocoder:
@@ -114,62 +151,123 @@ class TTSSoundOutput():
                                new_freq=out_sr
                                ).to(self.device)
         codec = T.MuLawEncoding().to(self.device)
+        nchunk = 0
+        btime = None
+        chunk = torch.empty(0).to(self.device)
+        chunk_o = torch.empty(0).to(self.device)
+        rsynth = RtpSynth(out_sr, out_ft)
         while True:
             try:
-                chunk = self.data_queue.get(timeout=0.03)
+                chunk_n = self.data_queue.get(timeout=0.03)
             except queue.Empty:
                 continue
-            if chunk is None:
+            if isinstance(chunk_n, TTSSMarkerEnd):
                 break
+            if isinstance(chunk_n, TTSSMarkerNewSent):
+                #btime = None
+                chunk = chunk[:0]
+                chunk_o = chunk_o[:0]
+                ptime = 0.0
+                stime = None
+                itime = monotonic()
+                continue
             ctime = monotonic()
 
+            if self.dl_ofname is not None:
+                if self.data_log is None:
+                    self.data_log = chunk_n
+                else:
+                    self.data_log = torch.cat((self.data_log,
+                                           chunk_n))
+
+            nchunk += 1
+            #print(chunk_n.size(), chunk.size())
+            chunk = torch.cat((chunk, chunk_n), dim=0)
+            if ptime == 0.0:
+                if btime == None:
+                    btime = self.samplerate * (ctime - itime) / 2
+                    if self.vocoder:
+                        btime /= self._frame_size
+                    btime = int(btime)
+                    if self.debug:
+                        print('btime', btime)
+                if chunk.size(0) < btime:
+                    if self.debug:
+                        print(f'{chunk.size(0)} < {btime}')
+                    continue
+
             if self.vocoder:
-                chunk = torch.cat((pfs, chunk), dim=0)
-                outputs = self.vocoder(chunk).squeeze(0)[pf_trim:]
+                chunk_o_n = torch.cat((pfs, chunk), dim=0)
+                outputs = self.vocoder(chunk_o_n).squeeze(0)[pf_trim:]
                 #print(chunk.shape, outputs.shape)
-                pfs = chunk[-self.pre_frames:, :]
+                pfs = chunk_o_n[-self.pre_frames:, :]
                 #print(pfs.size())
-                chunk = outputs
+                chunk_o_n = outputs
+            else:
+                chunk_o_n = chunk
             #chunk = chunk.cpu().numpy()
 
-            if self.data is None:
-                self.data = chunk
-            else:
-                self.data = torch.cat((self.data, chunk))
             if stime is None:
                 stime = ctime
 
-            chunk = resampler(chunk)
-            chunk = codec(chunk)
+            chunk_o_n = resampler(chunk_o_n)
+            #print('chunk_o_n', chunk_o_n.min(), chunk_o_n.max(), chunk_o_n.float().mean())
+            ##_chunk_o_n = (chunk_o_n * 32768).to(torch.int16)
+            ##print(_chunk_o_n[:10])
+            ##print(audioop_ulaw_compress(_chunk_o_n.cpu().numpy())[:10])
+            ##chunk_o_n = codec(chunk_o_n)
+            #print('chunk_o_n', chunk_o_n.min(), chunk_o_n.max(), chunk_o_n.float().mean())
+            chunk_o = torch.cat((chunk_o, chunk_o_n), dim=0)
 
-            while len(chunk) >= out_fsize:
-                packet = chunk[:out_fsize]
-                chunk = chunk[out_fsize:]
+            etime = ctime - stime
+            if self.debug or True:
+                print(f'consume_audio({len(chunk)}), etime = {etime}, ptime = {ptime}')
+
+            chunk = chunk[:0]
+
+            while chunk_o.size(0) >= out_fsize:
+                packet = chunk_o[:out_fsize]
+                chunk_o = chunk_o[out_fsize:]
 
                 ptime += len(packet) / out_sr
                 etime = ctime - stime
-                print(f'consume_audio({len(chunk)}), etime = {etime}, ptime = {ptime}')
+
+                #print(packet.size())
+                packet = (packet * 32767).to(torch.int16)
+                #packet = packet.byte().cpu().numpy()
+                packet = audioop_ulaw_compress(packet.cpu().numpy())
+                #print('packet', packet.min(), packet.max(), packet[:10])
+                packet = packet.tobytes()
+                #print(len(packet), packet[:10])
+                pkt = rsynth.next_pkt(out_fsize, out_pt, pload=packet)
+                if self.pkt_send_f is not None:
+                    self.pkt_send_f(pkt)
+                #print(len(pkt))
+                if self.debug:
+                    print(f'consume_audio({len(chunk_o)}), etime = {etime}, ptime = {ptime}')
                 if ptime > etime:
                     sleep(ptime - etime)
                     ctime = monotonic()
-                    print(f'consume_audio, sleep({ptime - etime})')
+                    if self.debug:
+                        print(f'consume_audio, sleep({ptime - etime})')
 
     def __del__(self):
         print('__del__')
         #self.worker_thread.join()
         if self.o_flt is not None:
             print(self.o_flt.size(2))
-        if self.data is not None:
-            amplification_dB = 20.0
-            data = self.data #* (10 ** (amplification_dB / 20))
-            #data = self.o_flt(data.unsqueeze(0).unsqueeze(0)).squeeze()
-            if self.o_flt is not None:
-                data = F.conv1d(data.unsqueeze(0).unsqueeze(0),
-                                self.o_flt,
-                                padding=(self.o_flt.size(2) - 1) // 2)
-                data = data.squeeze()
-            sf.write(self.ofname, data.detach().cpu().numpy(),
-                     samplerate=self.samplerate)
+        if self.data_log is None:
+            return
+        amplification_dB = 20.0
+        data = self.data_log #* (10 ** (amplification_dB / 20))
+        #data = self.o_flt(data.unsqueeze(0).unsqueeze(0)).squeeze()
+        if self.o_flt is not None:
+            data = F.conv1d(data.unsqueeze(0).unsqueeze(0),
+                            self.o_flt,
+                            padding=(self.o_flt.size(2) - 1) // 2)
+            data = data.squeeze()
+        sf.write(self.dl_ofname, data.detach().cpu().numpy(),
+                 samplerate=self.samplerate)
 
 from utils import load_checkpoint, scan_checkpoint
 
@@ -197,26 +295,47 @@ class TTS():
     speaker_embeddings = torch.tensor(embeddings_dataset[7306]["xvector"]).unsqueeze(0).to(model.device)
 
     def dotts(self, text, ofname):
-        writer = TTSSoundOutput(ofname, self.model.config.num_mel_bins,
-                                self.model.device) 
+        if False:
+            tts_voc, so_voc = None, self.vocoder
+        else:
+            tts_voc, so_voc = self.vocoder, None
+        writer = TTSSoundOutput(self.model.config.num_mel_bins,
+                                self.model.device,
+                                vocoder=so_voc, dl_ofname=ofname)
         speaker_embeddings = torch.randn(1, 512, device = self.model.device)
         speaker_embeddings = self.speaker_embeddings
         inputs = self.processor(text=text, return_tensors="pt").to(self.model.device)
         speech = self.model.generate_speech_rt(inputs["input_ids"], writer.soundout,
                                                speaker_embeddings,
-                                               vocoder=self.vocoder)
+                                               vocoder=tts_voc)
+        writer.soundout(TTSSMarkerEnd())
 
-tts = TTS()
-prompts = (
+    def start_pkt_proc(self, pkt_send_f):
+        writer = TTSSoundOutput(self.model.config.num_mel_bins,
+                                self.model.device,
+                                pkt_send_f=pkt_send_f)
+        return writer
+
+    def play_tts(self, text, writer):
+        inputs = self.processor(text=text,
+                                return_tensors="pt").to(self.model.device)
+        self.model.generate_speech_rt(inputs["input_ids"], writer.soundout,
+                                  self.speaker_embeddings,
+                                  vocoder=self.vocoder)
+
+
+if __name__ == '__main__':
+    tts = TTS()
+    prompts = (
         "Hello and welcome to Sippy Software, your VoIP solution provider.",
         "Today is Wednesday twenty third of August two thousand twenty three, five thirty in the afternoon.",
         "For many applications, such as sentiment analysis and text summarization, pretrained models work well without any additional model training.",
         "This message has been generated by combination of the Speech tee five pretrained text to speech models by Microsoft and fine tuned Hello Sippy realtime vocoder by Sippy Software Inc.",
         )
-for i, prompt in enumerate(prompts):
-    print(i)
-    fname = f"tts_example{i}.wav"
+    for i, prompt in enumerate(prompts):
+        print(i)
+        fname = f"tts_example{i}.wav"
 #    prompt = "Hello and welcome to Sippy Software, your VoIP solution provider. Today is Wednesday twenty-third of August two thousand twenty three, five thirty in the afternoon."
 #    prompt = 'For many applications, such as sentiment analysis and text summarization, pretrained models work well without any additional model training.'
     #prompt = "I've also played with the text-to-speech transformers those are great actually. I have managed making API more realtime and it works nicely!"
-    tts.dotts(prompt, fname)
+        tts.dotts(prompt, fname)

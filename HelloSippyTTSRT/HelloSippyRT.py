@@ -49,7 +49,7 @@ def _generate_speech_rt(
     pfs = torch.zeros(model.pre_frames, model.config.num_mel_bins,
                       device=model.device)
     pf_trim = model.pre_frames * model._frame_size
-    oschedule = [2, 2, 4, 8, 16]
+    oschedule = [2, 2, 4, 8, 16, 32]
     while True:
         idx += 1
 
@@ -109,12 +109,10 @@ def _generate_speech_rt(
                 oschedule.pop(0)
                 if len(oschedule) > 0:
                     output_len = oschedule[0]
-            elif qlen > 1 and output_len < 128:
+            elif qlen > 1 and output_len < 64:
                 output_len *= 2
             spectrogram = torch.zeros(0, model.config.num_mel_bins).to(model.device)
         if theend or theend_cb:
-            # Sentinel
-            speech_cb(None)
             break
 
     return idx
