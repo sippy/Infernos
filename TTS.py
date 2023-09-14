@@ -290,6 +290,11 @@ class TTS():
         vocoder.eval()
         self.vocoder = ipex.optimize(vocoder)
 
+    def get_rand_voice(self):
+        s_index = torch.randint(0, len(self.speaker_embeddings), (1,)).item()
+        rv = self.speaker_embeddings[s_index].to(self.model.device)
+        return rv
+
     def dotts(self, text, ofname):
         if False:
             tts_voc, so_voc = None, self.vocoder
@@ -299,8 +304,7 @@ class TTS():
                                 self.model.device,
                                 vocoder=so_voc, dl_ofname=ofname)
 
-        s_index = torch.randint(0, len(self.speaker_embeddings), (1,)).item()
-        speaker_embeddings = self.speaker_embeddings[s_index].to(self.model.device)
+        speaker_embeddings = self.get_rand_voice()
 
         inputs = self.processor(text=text, return_tensors="pt").to(self.model.device)
         speech = self.model.generate_speech_rt(inputs["input_ids"], writer.soundout,
@@ -317,8 +321,9 @@ class TTS():
     def play_tts(self, text, writer):
         inputs = self.processor(text=text,
                                 return_tensors="pt").to(self.model.device)
+        speaker_embeddings = self.get_rand_voice()
         self.model.generate_speech_rt(inputs["input_ids"], writer.soundout,
-                                  self.speaker_embeddings,
+                                  speaker_embeddings,
                                   vocoder=self.vocoder)
 
 
