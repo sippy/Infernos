@@ -272,27 +272,23 @@ class TTSSoundOutput():
 from utils import load_checkpoint, scan_checkpoint
 
 class TTS():
-    half_p = False
-    processor = SpeechT5Processor.from_pretrained("microsoft/speecht5_tts")
-    model = SpeechT5ForTextToSpeech.from_pretrained("microsoft/speecht5_tts").to('xpu')
-    if half_p:
-        model = model.half()
-    model.eval()
-    model = ipex.optimize(model)
-    embeddings_dataset = load_dataset("Matthijs/cmu-arctic-xvectors", split="validation")
-    _vc_conf = SpeechT5HifiGanConfig()
-    vocoder = SpeechT5HifiGan(config = _vc_conf).to(model.device)
     checkpoint_path = 'cp_hifigan.test'
-    cp_g = scan_checkpoint(checkpoint_path, 'g_')
-    state_dict_g = load_checkpoint(cp_g, model.device)
-    vocoder.load_state_dict(state_dict_g['generator'])
-    del state_dict_g
-    if half_p:
-        vocoder = vocoder.half()
-    vocoder.eval()
-    vocoder = ipex.optimize(vocoder)
 
-    speaker_embeddings = torch.tensor(embeddings_dataset[7306]["xvector"]).unsqueeze(0).to(model.device)
+    def __init__(self):
+        self.processor = SpeechT5Processor.from_pretrained("microsoft/speecht5_tts")
+        model = SpeechT5ForTextToSpeech.from_pretrained("microsoft/speecht5_tts").to('xpu')
+        model.eval()
+        self.model = ipex.optimize(model)
+        embeddings_dataset = load_dataset("Matthijs/cmu-arctic-xvectors", split="validation")
+        self.speaker_embeddings = [torch.tensor(ed["xvector"]).unsqueeze(0)
+                                       for ed in embeddings_dataset]
+        _vc_conf = SpeechT5HifiGanConfig()
+        vocoder = SpeechT5HifiGan(config = _vc_conf).to(model.device)
+        cp_g = scan_checkpoint(self.checkpoint_path, 'g_')
+        state_dict_g = load_checkpoint(cp_g, model.device)
+        vocoder.load_state_dict(state_dict_g['generator'])
+        vocoder.eval()
+        self.vocoder = ipex.optimize(vocoder)
 
     def dotts(self, text, ofname):
         if False:
@@ -302,8 +298,10 @@ class TTS():
         writer = TTSSoundOutput(self.model.config.num_mel_bins,
                                 self.model.device,
                                 vocoder=so_voc, dl_ofname=ofname)
-        speaker_embeddings = torch.randn(1, 512, device = self.model.device)
-        speaker_embeddings = self.speaker_embeddings
+
+        s_index = torch.randint(0, len(self.speaker_embeddings), (1,)).item()
+        speaker_embeddings = self.speaker_embeddings[s_index].to(self.model.device)
+
         inputs = self.processor(text=text, return_tensors="pt").to(self.model.device)
         speech = self.model.generate_speech_rt(inputs["input_ids"], writer.soundout,
                                                speaker_embeddings,
