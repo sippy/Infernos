@@ -66,6 +66,12 @@ class InfernRTPGen(Thread):
     def send_pkt(self, pkt):
         self.userv.send_to(pkt, self.target)
 
+    def get_state(self):
+        self.state_lock.acquire()
+        state = self.state
+        self.state_lock.release()
+        return state
+
     def run(self):
         self.state_lock.acquire()
         if self.state == RTPGenStop:
@@ -77,20 +83,16 @@ class InfernRTPGen(Thread):
         else:
             text = self.text
         self.state_lock.release()
-        while True:
-            self.state_lock.acquire()
-            cstate = self.state
-            self.state_lock.release()
-            if cstate == RTPGenStop:
+        for i, p in enumerate(text):
+            if self.get_state() == RTPGenStop:
                 break
-            for i, p in enumerate(text):
-                self.tts.play_tts(p, self.worker)
-                self.worker.soundout(TTSSMarkerNewSent())
-            break
+            self.tts.play_tts(p, self.worker)
+            self.worker.soundout(TTSSMarkerNewSent())
         self.worker.soundout(TTSSMarkerEnd())
         self.worker.join()
         ED2.callFromThread(self.sess_term)
         del self.sess_term
+        del self.worker
 
     def stop(self):
         self.state_lock.acquire()
