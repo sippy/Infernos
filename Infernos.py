@@ -6,6 +6,8 @@ from sippy.Core.EventDispatcher import ED2
 from sippy.SipConf import SipConf
 from sippy.SipLogger import SipLogger
 
+sys.path.append('.')
+
 from SIP.InfernUAS import InfernUAS, InfernUASConf
 
 if __name__ == '__main__':
@@ -69,7 +71,7 @@ if __name__ == '__main__':
     if lport != None:
         global_config['_sip_port'] = lport
     global_config['_sip_logger'] = SipLogger('pel_collect')
-    print(global_config)
+    #print(global_config)
 
     iuac = InfernUASConf()
     iuac.global_config = global_config
