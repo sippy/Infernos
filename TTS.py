@@ -95,7 +95,7 @@ class TTSSMarkerEnd(TTSSMarkerGeneric):
 
 TSO_SESSEND = None
 
-class TTSSoundOutput():
+class TTSSoundOutput(threading.Thread):
     pre_frames = 2
     _frame_size = 256
     debug = False
@@ -118,9 +118,9 @@ class TTSSoundOutput():
         self.samplerate = 16000
         if filter_out:
             self.o_flt = get_PBF(self.samplerate)
-        self.worker_thread = threading.Thread(target=self.consume_audio)
-        self.worker_thread.daemon = True
-        self.worker_thread.start()
+        super().__init__(target=self.consume_audio)
+        self.daemon = True
+        self.start()
 
     def soundout(self, chunk):
         #print(f'soundout: {monotonic():4.3f}')
@@ -132,7 +132,7 @@ class TTSSoundOutput():
             print(f'len(chunk) = {len(chunk)}')
         self.data_queue.put(chunk)
         if iseos:
-            self.worker_thread.join()
+            self.join()
         return (self.data_queue.qsize(), False)
 
     def consume_audio(self):
