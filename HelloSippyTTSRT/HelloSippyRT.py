@@ -41,15 +41,20 @@ def _generate_speech_rt(
 
     spectrogram = torch.zeros(0, model.config.num_mel_bins).to(model.device)
     past_key_values = None
-    output_len = 2
     idx = 0
 
     ###stime_pre = None
     btime = monotonic()
-    pfs = torch.zeros(model.pre_frames, model.config.num_mel_bins,
+    prfs = torch.zeros(model.pre_frames, model.config.num_mel_bins,
                       device=model.device)
-    pf_trim = model.pre_frames * model._frame_size
-    oschedule = [2, 2, 4, 8, 16, 32]
+    pofs = torch.zeros(model.post_frames, model.config.num_mel_bins,
+                       device=model.device)
+    trim_pr = model.pre_frames * model._frame_size
+    trim_po = model.post_frames * model._frame_size
+    eframes = model.pre_frames + model.post_frames
+    oschedule = [4, 4, 8, 8, 16]
+    output_len = oschedule[0]
+    chunk_size = model.chunk_size
     while True:
         idx += 1
 
@@ -88,19 +93,31 @@ def _generate_speech_rt(
         if idx >= minlen and (int(sum(prob >= threshold)) > 0 or idx >= maxlen):
             theend = True
 
-        if len(spectrogram) >= output_len or (theend and len(spectrogram) > 0):
+        if (len(spectrogram) >= output_len and len(spectrogram) + prfs.size(0) >= chunk_size + eframes) \
+          or (theend and len(spectrogram) > 0):
             _s = spectrogram.unsqueeze(0)
             _s = model.speech_decoder_postnet.postnet(_s)
             _s = _s.squeeze(0)
+            #print(_s.size(0), prfs.size(0), _s.device)
             if vocoder is not None:
-                #_s = _s.permute(1, 0).unsqueeze(0)
-                #print(_s.shape, _s.device)
-                _s = torch.cat((pfs, _s), dim=0)
-                outputs = vocoder(_s)
-                #print(outputs.size())
-                outputs = outputs[pf_trim:]
+                _s = [prfs, _s]
+                if theend:
+                    _s.append(pofs)
+                _s = torch.cat(_s, dim=0)
+                outputs = []
+                while _s.size(0) >= eframes + chunk_size:
+                    #print(_s.size(), _s.device)
+                    _o = vocoder(_s[:eframes + chunk_size, :])
+                    outputs.append(_o[trim_pr:-trim_po])
+                    #print('out', _o.size(), outputs[-1].size())
+                    _s = _s[chunk_size:, :]
+                outputs = torch.cat(outputs, dim=0)
+                #print('_s after:', _s.size(0))
+                assert _s.size(0) >= eframes and _s.size(0) < eframes + chunk_size
+                #print('outputs', outputs.size())
+                outputs = outputs[trim_pr:]
                 #print(_s.shape, outputs.shape)
-                pfs = _s[-model.pre_frames:, :]
+                prfs = _s
             else:
                 outputs = _s
             #print(monotonic() - btime)
@@ -109,7 +126,7 @@ def _generate_speech_rt(
                 oschedule.pop(0)
                 if len(oschedule) > 0:
                     output_len = oschedule[0]
-            elif qlen > 1 and output_len < 64:
+            elif qlen > 1 and output_len < 128:
                 output_len *= 2
             spectrogram = torch.zeros(0, model.config.num_mel_bins).to(model.device)
         if theend or theend_cb:
@@ -119,6 +136,8 @@ def _generate_speech_rt(
 
 class HelloSippyRT(SpeechT5ForTextToSpeech):
     pre_frames: int = 2
+    post_frames: int = 2
+    chunk_size: int = 4
     _frame_size: int = 256
 
     @torch.no_grad()
