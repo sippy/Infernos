@@ -32,19 +32,16 @@ blazing-fast future, free from lag.
 ## Quick Start
 
 1.  Clone the repository:
-
 &nbsp;
 
     git clone https://github.com/sippy/Infernos.git
 
 2.  Navigate to the project directory and install dependencies:
-
 &nbsp;
 
     cd Infernos && pip install -r requirements.txt
 
 3.  Light the fire:
-
 &nbsp;
 
     python Infernos.py
