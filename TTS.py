@@ -1,4 +1,5 @@
-from transformers import SpeechT5Processor, SpeechT5HifiGanConfig, SpeechT5HifiGan
+from transformers import SpeechT5Processor, SpeechT5HifiGanConfig, SpeechT5HifiGan, \
+        SpeechT5Config
 from datasets import load_dataset
 import intel_extension_for_pytorch as ipex
 import torch
@@ -276,7 +277,9 @@ class TTS():
 
     def __init__(self):
         self.processor = SpeechT5Processor.from_pretrained("microsoft/speecht5_tts")
-        model = SpeechT5ForTextToSpeech.from_pretrained("microsoft/speecht5_tts").to('xpu')
+        mc = SpeechT5Config(max_speech_positions=4000)
+        model = SpeechT5ForTextToSpeech.from_pretrained("microsoft/speecht5_tts",
+                                                        config=mc).to('xpu')
         model.eval()
         self.model = ipex.optimize(model)
         embeddings_dataset = load_dataset("Matthijs/cmu-arctic-xvectors", split="validation")
