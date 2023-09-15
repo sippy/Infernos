@@ -221,7 +221,7 @@ class TTSSoundOutput(threading.Thread):
             chunk_o = torch.cat((chunk_o, chunk_o_n), dim=0)
 
             etime = ctime - stime
-            if self.debug or True:
+            if self.debug:
                 print(f'consume_audio({len(chunk)}), etime = {etime}, ptime = {ptime}')
 
             chunk = chunk[:0]
