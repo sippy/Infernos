@@ -22,7 +22,7 @@ to lag and hello to a blazing-fast future.
 
 1. Clone the repository:
 ```
-git clone https://github.com/yourusername/Infernos.git
+git clone https://github.com/sippy/Infernos.git
 ```
 2. Navigate to the project directory and install dependencies:
 ```
