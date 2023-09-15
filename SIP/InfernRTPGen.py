@@ -23,6 +23,7 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 # SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+from sippy.Core.EventDispatcher import ED2
 from threading import Thread, Lock
 
 import sys
@@ -43,8 +44,9 @@ class InfernRTPGen(Thread):
     target = None
     worker = None
 
-    def __init__(self, tts):
+    def __init__(self, tts, sess_term):
         self.tts = tts
+        self.sess_term = sess_term
         super().__init__()
         self.setDaemon(True)
 
@@ -86,6 +88,9 @@ class InfernRTPGen(Thread):
                 self.worker.soundout(TTSSMarkerNewSent())
             break
         self.worker.soundout(TTSSMarkerEnd())
+        self.worker.join()
+        ED2.callFromThread(self.sess_term)
+        del self.sess_term
 
     def stop(self):
         self.state_lock.acquire()
