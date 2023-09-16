@@ -171,6 +171,8 @@ class TTSSoundOutput(threading.Thread):
                 ptime = 0.0
                 stime = None
                 itime = monotonic()
+                rsynth.resync()
+                rsynth.set_mbt(1)
                 continue
             ctime = monotonic()
 
@@ -321,12 +323,13 @@ class TTS():
                                 pkt_send_f=pkt_send_f)
         return writer
 
-    def play_tts(self, text, writer):
+    def play_tts(self, text, writer, speaker=None):
         inputs = self.processor(text=text,
                                 return_tensors="pt").to(self.model.device)
-        speaker_embeddings = self.get_rand_voice()
+        if speaker is None:
+            speaker = self.get_rand_voice()
         self.model.generate_speech_rt(inputs["input_ids"], writer.soundout,
-                                  speaker_embeddings,
+                                  speaker,
                                   vocoder=self.vocoder)
 
 
