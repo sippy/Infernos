@@ -84,10 +84,18 @@ class InfernRTPGen(Thread):
             text = self.text
         self.state_lock.release()
         for i, p in enumerate(text):
-            if self.get_state() == RTPGenStop:
-                break
-            self.tts.play_tts(p, self.worker)
-            self.worker.soundout(TTSSMarkerNewSent())
+            sents = p.split('|')
+            speaker = self.tts.get_rand_voice()
+            for si, p in enumerate(sents):
+                if self.get_state() == RTPGenStop:
+                    break
+                if si > 0:
+                    from time import sleep
+                    sleep(0.5)
+                    #print('sleept')
+                print('Playing', p)
+                self.tts.play_tts(p, self.worker, speaker)
+                self.worker.soundout(TTSSMarkerNewSent())
         self.worker.soundout(TTSSMarkerEnd())
         self.worker.join()
         ED2.callFromThread(self.sess_term)
