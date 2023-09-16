@@ -10,6 +10,21 @@ sys.path.append('.')
 
 from SIP.InfernUAS import InfernUAS, InfernUASConf
 
+def patch_signals():
+    import threading
+    import signal
+
+    def _start_new_thread(*args):
+        allsigs = [x for x in range(1, signal.NSIG)]
+
+        old_sigset = signal.pthread_sigmask(signal.SIG_BLOCK, allsigs)
+        ret = _old_start_new_thread(*args)
+        signal.pthread_sigmask(signal.SIG_SETMASK, old_sigset)
+        return ret
+
+    _old_start_new_thread = threading._start_new_thread
+    threading._start_new_thread = _start_new_thread
+
 if __name__ == '__main__':
     try:
         opts, args = getopt(sys.argv[1:], 'fl:p:n:L:s:u:P:i:')
@@ -56,6 +71,9 @@ if __name__ == '__main__':
 
     if not foreground:
         daemonize(logfile)
+
+    patch_signals()
+
     if logfile == '-':
         lfile = sys.stdout
     else:
