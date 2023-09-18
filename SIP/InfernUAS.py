@@ -69,7 +69,7 @@ class InfernUASConf(object):
         self.laddr = SipConf.my_address
         self.lport = SipConf.my_port
 
-prompts = [f'Welcome to Infernos.|{human_readable_time()}',] + smith_set() + hal_set() #+ t900_set() 
+prompts = [f'{human_readable_time()}', 'Welcome to Infernos.'] + smith_set() + hal_set() #+ t900_set() 
 
 class InfernUAS(object):
     _o = None
