@@ -56,7 +56,7 @@ wq_fixes = (
     ('Thomas A[.] Anderson','Thomas "A" Anderson'),
     ('i-sy,', 'iiisy,'), ('i-zy,', 'iiizzy,'),
     ('Agent Smith As', 'As'), ('.*edit[]] ', ''),
-    ('Trinity: .*', ''),
+    ('Trinity: .*', ''), ('ar-riage', 'arrrrrrriage'),
 )
 
 class ECFail(Exception):
