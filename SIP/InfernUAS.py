@@ -129,6 +129,7 @@ class InfernUAS(object):
             rserv_opts.nworkers = 1
             self.rserv = Udp_server({}, rserv_opts)
             self.rgen = InfernRTPGen(self.tts, self.sess_term)
+            self.rgen.dl_file = 'Infernos.check.wav'
             self.rgen.start(prompts, self.rserv, rtp_target)
             sect = self.body.content.sections[0]
             sect.c_header.addr = self.rserv.uopts.laddress[0]
