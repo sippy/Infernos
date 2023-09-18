@@ -53,7 +53,7 @@ wq_fixes = (
     (r'\s+', ' '), ('Mr[.]', 'Mister'),
     ('Dr[.]', 'Doctor'), ('Drs.', 'Doctors'), ('["]', ''),
     (r'\d+', number_to_words), ('H.A.L.', '"H" "A" "L"'),
-    ('Thomas A[.] Anderson','Thomas "A" Anderson'),
+    ('Thomas A[.] Anderson','Thomas A Anderson'),
     ('i-sy,', 'iiisy,'), ('i-zy,', 'iiizzy,'),
     ('Agent Smith As', 'As'), ('.*edit[]] ', ''),
     ('Trinity: .*', ''), ('ar-riage', 'arrrrrrriage'),
