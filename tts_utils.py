@@ -57,6 +57,7 @@ wq_fixes = (
     ('i-sy,', 'iiisy,'), ('i-zy,', 'iiizzy,'),
     ('Agent Smith As', 'As'), ('.*edit[]] ', ''),
     ('Trinity: .*', ''), ('ar-riage', 'arrrrrrriage'),
+    ('Dialogue The ', 'The '),
 )
 
 class ECFail(Exception):
