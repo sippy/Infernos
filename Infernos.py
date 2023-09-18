@@ -3,7 +3,6 @@ import os, sys
 
 from sippy.misc import daemonize
 from sippy.Core.EventDispatcher import ED2
-from sippy.SipConf import SipConf
 from sippy.SipLogger import SipLogger
 
 sys.path.append('.')
@@ -15,7 +14,7 @@ def patch_signals():
     import signal
 
     def _start_new_thread(*args):
-        allsigs = [x for x in range(1, signal.NSIG)]
+        allsigs = list(signal.valid_signals())
 
         old_sigset = signal.pthread_sigmask(signal.SIG_BLOCK, allsigs)
         ret = _old_start_new_thread(*args)
@@ -32,34 +31,32 @@ if __name__ == '__main__':
         print('usage: pel_collect.py [-l addr] [-p port] [-n addr] [-f] [-L logfile] [-u authname [-P authpass]]\n' \
           '                   [-i pidfile]')
         sys.exit(1)
-    laddr = None
-    lport = None
     sdev = None
     authname = None
     authpass = None
     logfile = '/var/log/pel_collect.log'
     pidfile = None
-    global_config = {'nh_addr':['192.168.0.102', 5060]}
+    iuac = InfernUASConf()
     foreground = False
     for o, a in opts:
         if o == '-f':
             foreground = True
         elif o == '-l':
-            laddr = a
+            iuac.laddr = a
         elif o == '-p':
-            lport = int(a)
+            iuac.lport = int(a)
         elif o == '-L':
             logfile = a
         elif o == '-n':
             if a.startswith('['):
                 parts = a.split(']', 1)
-                global_config['nh_addr'] = [parts[0] + ']', 5060]
+                iuac.nh_add = [parts[0] + ']', 5060]
                 parts = parts[1].split(':', 1)
             else:
                 parts = a.split(':', 1)
-                global_config['nh_addr'] = [parts[0], 5060]
+                iuac.nh_addr = [parts[0], 5060]
             if len(parts) == 2:
-                global_config['nh_addr'][1] = int(parts[1])
+                iuac.nh_add[1] = int(parts[1])
         elif o == '-s':
             sdev = a
         elif o == '-u':
@@ -82,17 +79,8 @@ if __name__ == '__main__':
     if pidfile != None:
         open(pidfile, 'w').write('%d' % os.getpid())
 
-    global_config['_sip_address'] = SipConf.my_address
-    global_config['_sip_port'] = SipConf.my_port
-    if laddr != None:
-        global_config['_sip_address'] = laddr
-    if lport != None:
-        global_config['_sip_port'] = lport
-    global_config['_sip_logger'] = SipLogger('pel_collect')
-    #print(global_config)
+    iuac.logger = SipLogger('Infernos')
 
-    iuac = InfernUASConf()
-    iuac.global_config = global_config
     iuac.authname = authname
     iuac.authpass = authpass
     iuac.cli = iuac.cld = authname

@@ -34,6 +34,7 @@ from sippy.SdpOrigin import SdpOrigin
 from sippy.Udp_server import Udp_server, Udp_server_opts
 from sippy.SipURL import SipURL
 from sippy.SipRegistrationAgent import SipRegistrationAgent
+from sippy.SipConf import SipConf
 
 from sippy.misc import local4remote
 
@@ -55,11 +56,18 @@ body_txt = 'v=0\r\n' + \
   '\r\n'
 
 class InfernUASConf(object):
-    global_config = None
     cli = 'infernos_uas'
     cld = 'infernos_uac'
     authname = None
     authpass = None
+    nh_addr = ('192.168.0.102', 5060)
+    laddr = None
+    lport = None
+    logger = None
+
+    def __init__(self):
+        self.laddr = SipConf.my_address
+        self.lport = SipConf.my_port
 
 prompts = [f'Welcome to Infernos.|{human_readable_time()}',] + smith_set() + hal_set() #+ t900_set() 
 
@@ -71,21 +79,27 @@ class InfernUAS(object):
     rserv = None
     ragent = None
     tts = None
+    sippy_c = None
 
     def __init__(self, iao):
+        self.sippy_c = {'nh_addr':tuple(iao.nh_addr),
+                        '_sip_address':iao.laddr,
+                        '_sip_port':iao.lport,
+                        '_sip_logger':iao.logger}
         self.tts = TTS()
         self._o = iao
         udsc, udsoc = SipTransactionManager.model_udp_server
         udsoc.nworkers = 1
-        iao.global_config['_sip_tm'] = SipTransactionManager(iao.global_config, self.recvRequest)
+        stm =  SipTransactionManager(self.sippy_c, self.recvRequest)
+        self.sippy_c['_sip_tm'] = stm
         self.body = MsgBody(body_txt)
         self.body.parse()
-        proxy, port = iao.global_config['nh_addr']
+        proxy, port = self.sippy_c['nh_addr']
         aor = SipURL(username = iao.cli, host = proxy, port = port)
         caddr = local4remote(proxy)
-        cport = iao.global_config['_sip_port']
+        cport = self.sippy_c['_sip_port']
         contact = SipURL(username = iao.cli, host = caddr, port = cport)
-        ragent = SipRegistrationAgent(iao.global_config, aor, contact, user = iao.authname, passw = iao.authpass)
+        ragent = SipRegistrationAgent(self.sippy_c, aor, contact, user = iao.authname, passw = iao.authpass)
         ragent.rmsg.getHFBody('to').getUrl().username = iao.cld
         ragent.doregister()
 
@@ -111,7 +125,7 @@ class InfernUAS(object):
             if self.rserv != None:
                 return (req.genResponse(486, 'Busy Here'), None, None)
             # New dialog
-            self.uaA = UA(self._o.global_config, self.recvEvent, disc_cbs = (self.sess_term,))
+            self.uaA = UA(self.sippy_c, self.recvEvent, disc_cbs = (self.sess_term,))
             self.uaA.recvRequest(req, sip_t)
             return
         return (req.genResponse(501, 'Not Implemented'), None, None)
