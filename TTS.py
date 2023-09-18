@@ -103,12 +103,11 @@ class TTSSoundOutput(threading.Thread):
     data_log = None
     o_flt = None
     num_mel_bins = None
+    pkg_send_f = None
+    dl_ofname = None
 
-    def __init__(self, num_mel_bins, device, vocoder=None, filter_out=False,
-                 dl_ofname=None, pkt_send_f=None):
+    def __init__(self, num_mel_bins, device, vocoder=None, filter_out=False):
         self.itime = monotonic()
-        self.dl_ofname = dl_ofname
-        self.pkt_send_f = pkt_send_f
         self.vocoder = vocoder
         self.num_mel_bins = num_mel_bins
         self.device = device
@@ -120,7 +119,12 @@ class TTSSoundOutput(threading.Thread):
             self.o_flt = get_PBF(self.samplerate)
         super().__init__(target=self.consume_audio)
         self.daemon = True
-        self.start()
+
+    def enable_datalog(self, dl_ofname):
+        self.dl_ofname = dl_ofname
+
+    def set_pkt_send_f(self, pkt_send_f):
+        self.pkt_send_f = pkt_send_f
 
     def soundout(self, chunk):
         #print(f'soundout: {monotonic():4.3f}')
@@ -188,7 +192,9 @@ class TTSSoundOutput(threading.Thread):
             chunk = torch.cat((chunk, chunk_n), dim=0)
             if ptime == 0.0:
                 if btime == None:
-                    btime = self.samplerate * (ctime - itime) / 2
+                    min_btime = 1.0
+                    btime = min(ctime - itime, min_btime)
+                    btime = self.samplerate * btime / 2
                     if self.vocoder:
                         btime /= self._frame_size
                     btime = int(btime)
@@ -236,7 +242,7 @@ class TTSSoundOutput(threading.Thread):
                 etime = ctime - stime
 
                 #print(packet.size())
-                packet = (packet * 32767).to(torch.int16)
+                packet = (packet * 15000).to(torch.int16)
                 #packet = packet.byte().cpu().numpy()
                 packet = audioop_ulaw_compress(packet.cpu().numpy())
                 #print('packet', packet.min(), packet.max(), packet[:10])
@@ -307,7 +313,9 @@ class TTS():
             tts_voc, so_voc = self.vocoder, None
         writer = TTSSoundOutput(self.model.config.num_mel_bins,
                                 self.model.device,
-                                vocoder=so_voc, dl_ofname=ofname)
+                                vocoder=so_voc)
+        writer.enable_datalog(ofname)
+        writer.start()
 
         speaker_embeddings = self.get_rand_voice()
 
@@ -317,10 +325,9 @@ class TTS():
                                                vocoder=tts_voc)
         writer.soundout(TTSSMarkerEnd())
 
-    def start_pkt_proc(self, pkt_send_f):
+    def get_pkt_proc(self):
         writer = TTSSoundOutput(self.model.config.num_mel_bins,
-                                self.model.device,
-                                pkt_send_f=pkt_send_f)
+                                self.model.device)
         return writer
 
     def play_tts(self, text, writer, speaker=None):
