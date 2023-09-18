@@ -100,7 +100,8 @@ class InfernRTPGen(Thread):
                     sleep(0.5)
                     #print('sleept')
                 print('Playing', p)
-                self.tts.play_tts(p, self.worker, speaker)
+                self.tts.tts_rt(p, self.worker.soundout,
+                                speaker)
                 self.worker.soundout(TTSSMarkerNewSent())
         self.worker.soundout(TTSSMarkerEnd())
         self.worker.join()

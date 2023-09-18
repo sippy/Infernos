@@ -1,24 +1,31 @@
 from typing import Callable, Optional
 from time import monotonic
 import torch
-from transformers import SpeechT5ForTextToSpeech, SpeechT5PreTrainedModel
+from transformers import SpeechT5ForTextToSpeech, SpeechT5PreTrainedModel, \
+        SpeechT5HifiGanConfig, SpeechT5HifiGan, SpeechT5Processor, \
+        SpeechT5Config
 from transformers.models.speecht5.modeling_speecht5 import \
         SpeechT5EncoderWithSpeechPrenet
+from datasets import load_dataset
+import torch.nn as nn
 
 GenerateSpeech_cb = Callable[[torch.FloatTensor], None]
 
+class HelloSippyRT():
+    pass
+
 def _generate_speech_rt(
-    model: SpeechT5PreTrainedModel,
+    hsrt: HelloSippyRT,
     input_values: torch.FloatTensor,
     speech_cb: GenerateSpeech_cb,
     speaker_embeddings: Optional[torch.FloatTensor] = None,
     threshold: float = 0.5,
     minlenratio: float = 0.0,
     maxlenratio: float = 20.0,
-    vocoder: Optional[torch.nn.Module] = None,
 ) -> int:
     encoder_attention_mask = torch.ones_like(input_values)
 
+    model = hsrt.model
     encoder_out = model.speecht5.encoder(
         input_values=input_values,
         attention_mask=encoder_attention_mask,
@@ -45,16 +52,18 @@ def _generate_speech_rt(
 
     ###stime_pre = None
     btime = monotonic()
-    prfs = torch.zeros(model.pre_frames, model.config.num_mel_bins,
+    p_ch = hsrt.chunker
+    prfs = torch.zeros(p_ch.pre_frames, model.config.num_mel_bins,
                       device=model.device)
-    pofs = torch.zeros(model.post_frames, model.config.num_mel_bins,
+    pofs = torch.zeros(p_ch.post_frames, model.config.num_mel_bins,
                        device=model.device)
-    trim_pr = model.pre_frames * model._frame_size
-    trim_po = model.post_frames * model._frame_size
-    eframes = model.pre_frames + model.post_frames
-    oschedule = [4, 4, 8, 8, 16]
+    trim_pr = p_ch.pre_frames * p_ch.frame_size
+    trim_po = p_ch.post_frames * p_ch.frame_size
+    eframes = p_ch.pre_frames + p_ch.post_frames
+    oschedule = [p_ch.chunk_size, p_ch.chunk_size, p_ch.chunk_size*2]
     output_len = oschedule[0]
-    chunk_size = model.chunk_size
+    chunk_size = p_ch.chunk_size
+    vocoder = hsrt.vocoder
     while True:
         idx += 1
 
@@ -99,27 +108,40 @@ def _generate_speech_rt(
             _s = model.speech_decoder_postnet.postnet(_s)
             _s = _s.squeeze(0)
             #print(_s.size(0), prfs.size(0), _s.device)
-            if vocoder is not None:
-                _s = [prfs, _s]
-                if theend:
-                    _s.append(pofs)
-                _s = torch.cat(_s, dim=0)
-                outputs = []
-                while _s.size(0) >= eframes + chunk_size:
-                    #print(_s.size(), _s.device)
-                    _o = vocoder(_s[:eframes + chunk_size, :])
-                    outputs.append(_o[trim_pr:-trim_po])
-                    #print('out', _o.size(), outputs[-1].size())
-                    _s = _s[chunk_size:, :]
-                outputs = torch.cat(outputs, dim=0)
-                #print('_s after:', _s.size(0))
-                assert _s.size(0) >= eframes and _s.size(0) < eframes + chunk_size
-                #print('outputs', outputs.size())
-                outputs = outputs[trim_pr:]
-                #print(_s.shape, outputs.shape)
-                prfs = _s
-            else:
-                outputs = _s
+            in_size = _s.size()
+            _s = [prfs, _s]
+            if theend:
+                _s.append(pofs)
+            _s = torch.cat(_s, dim=0)
+            extra_pad = (_s.size(0) - eframes) % chunk_size
+            assert extra_pad < chunk_size
+            if extra_pad > 0:
+                extra_pad = chunk_size - extra_pad
+                #print(_s.size())
+                _pofs = torch.zeros(extra_pad,
+                                    _s.size(1), device=_s.device)
+                _s = torch.cat((_s, _pofs), dim=0)
+            outputs = []
+            while _s.size(0) >= eframes + chunk_size:
+                #print(_s.size(), _s.device)
+                _i = _s[:eframes + chunk_size, :]
+                _o = vocoder(_i).unsqueeze(0)
+                _o = p_ch(_i, _o)
+                outputs.append(_o.squeeze(0))
+                #outputs.append(_o[trim_pr:-trim_po])
+                #print('out', _o.size(), outputs[-1].size())
+                _s = _s[chunk_size:, :]
+            if extra_pad > 0:
+                ep_trim = extra_pad * p_ch.frame_size
+                assert outputs[-1].size(0) > ep_trim
+                outputs[-1] = outputs[-1][:-ep_trim]
+            outputs = torch.cat(outputs, dim=0)
+            #print('_s after:', _s.size(0))
+            assert _s.size(0) >= eframes and _s.size(0) < eframes + chunk_size
+            #print('prfs', prfs.size(), 'inputs', in_size, 'outputs', outputs.size(), '_s', _s.size())
+            #outputs = outputs[trim_pr:]
+            #print(_s.shape, outputs.shape)
+            prfs = _s
             #print(monotonic() - btime)
             qlen, theend_cb = speech_cb(outputs)
             if output_len in oschedule:
@@ -134,11 +156,84 @@ def _generate_speech_rt(
 
     return idx
 
-class HelloSippyRT(SpeechT5ForTextToSpeech):
-    pre_frames: int = 2
-    post_frames: int = 2
-    chunk_size: int = 4
-    _frame_size: int = 256
+class AmendmentNetwork(nn.Module):
+    hidden_dim = 31
+    kernel_size = 5
+    pre_frames: int
+    post_frames: int
+    frame_size: int
+    chunk_size: int
+    trim_pr: int
+    trim_po: int
+    output_size: int
+    def __init__(self, chunk_size=8, pre_frames=2, post_frames=2,
+                 frame_size=256, num_mels=80):
+        super(AmendmentNetwork, self).__init__()
+
+        eframes = pre_frames + post_frames
+        self.pre_frames = pre_frames
+        self.post_frames = post_frames
+        self.frame_size = frame_size
+        self.chunk_size = chunk_size
+        self.trim_pr = pre_frames * frame_size
+        self.trim_po = post_frames * frame_size
+        input_size_m = num_mels * (chunk_size + eframes)
+        input_size_a = frame_size * (chunk_size + eframes)
+        self.output_size = chunk_size * frame_size
+
+        self.fc1_mel = nn.Linear(input_size_m, self.hidden_dim)
+        self.fc1_audio = nn.Linear(input_size_a, self.hidden_dim)
+        self.fc2 = nn.Linear(2 * self.hidden_dim, self.hidden_dim * 2)
+        self.conv_out = nn.Conv1d(in_channels=self.hidden_dim * 2,
+                                  out_channels=self.output_size,
+                                  kernel_size=self.kernel_size,
+                                  padding=self.kernel_size // 2)
+        self.lrelu = nn.LeakyReLU(0.01)  # default negative slope is 0.01
+
+    def forward(self, mel, audio):
+        batch_size = audio.size(0)
+
+        mel = mel.view(batch_size, -1)  # Flatten the mel input
+
+        mel_out = self.lrelu(self.fc1_mel(mel))
+        audio_out = self.lrelu(self.fc1_audio(audio))
+
+        combined = torch.cat([mel_out, audio_out], dim=1)
+
+        x = self.lrelu(self.fc2(combined))
+        x = x.unsqueeze(2)
+        x = self.conv_out(x).squeeze(2)
+        amended_audio = audio[:, self.trim_pr:-self.trim_po] * self.lrelu(x)
+
+        return amended_audio.clamp(min=-1.0, max=1.0)
+
+class HelloSippyRT():
+    processor: SpeechT5Processor
+    chunker: AmendmentNetwork
+    vocoder: SpeechT5HifiGan
+    model: SpeechT5ForTextToSpeech
+    def __init__(self, device):
+        self.processor = SpeechT5Processor.from_pretrained("microsoft/speecht5_tts")
+        mc = SpeechT5Config(max_speech_positions=4000)
+        model = SpeechT5ForTextToSpeech.from_pretrained("microsoft/speecht5_tts",
+                                                        config=mc).to(device)
+        model.eval()
+        self.model = model
+        _vc_conf = SpeechT5HifiGanConfig()
+        vocoder = SpeechT5HifiGan.from_pretrained("microsoft/speecht5_hifigan",
+                                                  config = _vc_conf).to(device)
+        vocoder.eval()
+        self.vocoder = vocoder
+        self.chunker = AmendmentNetwork().to(device)
+        self.chunker.eval()
+        embeddings_dataset = load_dataset("Matthijs/cmu-arctic-xvectors", split="validation")
+        self.speaker_embeddings = [torch.tensor(ed["xvector"]).unsqueeze(0)
+                                       for ed in embeddings_dataset]
+
+    def get_rand_voice(self):
+        s_index = torch.randint(0, len(self.speaker_embeddings), (1,)).item()
+        rv = self.speaker_embeddings[s_index].to(self.model.device)
+        return rv
 
     @torch.no_grad()
     def generate_speech_rt(
@@ -149,7 +244,6 @@ class HelloSippyRT(SpeechT5ForTextToSpeech):
         threshold: float = 0.5,
         minlenratio: float = 0.0,
         maxlenratio: float = 20.0,
-        vocoder: Optional[torch.nn.Module] = None,
     ) -> int:
         return _generate_speech_rt(
             self,
@@ -159,5 +253,13 @@ class HelloSippyRT(SpeechT5ForTextToSpeech):
             threshold,
             minlenratio,
             maxlenratio,
-            vocoder,
         )
+
+    @torch.no_grad()
+    def tts_rt(self, text, speech_cb, speaker=None):
+        inputs = self.processor(text=text,
+                                return_tensors="pt").to(self.model.device)
+        if speaker is None:
+            speaker = self.get_rand_voice()
+        self.generate_speech_rt(inputs["input_ids"], speech_cb,
+                                  speaker)

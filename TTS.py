@@ -1,5 +1,3 @@
-from transformers import SpeechT5Processor, SpeechT5HifiGanConfig, SpeechT5HifiGan, \
-        SpeechT5Config
 from datasets import load_dataset
 import intel_extension_for_pytorch as ipex
 import torch
@@ -8,7 +6,7 @@ import os.path
 import numpy as np
 import torchaudio.transforms as T
 
-from HelloSippyTTSRT.HelloSippyRT import HelloSippyRT as SpeechT5ForTextToSpeech
+from HelloSippyTTSRT.HelloSippyRT import HelloSippyRT
 
 import queue
 import threading
@@ -242,7 +240,7 @@ class TTSSoundOutput(threading.Thread):
                 etime = ctime - stime
 
                 #print(packet.size())
-                packet = (packet * 15000).to(torch.int16)
+                packet = (packet * 20000).to(torch.int16)
                 #packet = packet.byte().cpu().numpy()
                 packet = audioop_ulaw_compress(packet.cpu().numpy())
                 #print('packet', packet.min(), packet.max(), packet[:10])
@@ -280,31 +278,19 @@ class TTSSoundOutput(threading.Thread):
 
 from utils import load_checkpoint, scan_checkpoint
 
-class TTS():
+class TTS(HelloSippyRT):
     checkpoint_path = 'cp_hifigan.test'
+    device = 'xpu'
 
     def __init__(self):
-        self.processor = SpeechT5Processor.from_pretrained("microsoft/speecht5_tts")
-        mc = SpeechT5Config(max_speech_positions=4000)
-        model = SpeechT5ForTextToSpeech.from_pretrained("microsoft/speecht5_tts",
-                                                        config=mc).to('xpu')
-        model.eval()
-        self.model = ipex.optimize(model)
-        embeddings_dataset = load_dataset("Matthijs/cmu-arctic-xvectors", split="validation")
-        self.speaker_embeddings = [torch.tensor(ed["xvector"]).unsqueeze(0)
-                                       for ed in embeddings_dataset]
-        _vc_conf = SpeechT5HifiGanConfig()
-        vocoder = SpeechT5HifiGan(config = _vc_conf).to(model.device)
-        cp_g = scan_checkpoint(self.checkpoint_path, 'g_')
-        state_dict_g = load_checkpoint(cp_g, model.device)
-        vocoder.load_state_dict(state_dict_g['generator'])
-        vocoder.eval()
-        self.vocoder = ipex.optimize(vocoder)
-
-    def get_rand_voice(self):
-        s_index = torch.randint(0, len(self.speaker_embeddings), (1,)).item()
-        rv = self.speaker_embeddings[s_index].to(self.model.device)
-        return rv
+        super().__init__(self.device)
+        cp_g = scan_checkpoint('cp_hellosippy.test', 'g_')
+        state_dict_g = load_checkpoint(cp_g, self.device)
+        self.chunker.load_state_dict(state_dict_g['generator'])
+        self.model = ipex.optimize(self.model)
+        self.vocoder = ipex.optimize(self.vocoder)
+        #self.chunker = ipex.optimize(self.chunker)
+        #raise Exception(f"{type(hsrt.chunker)}")
 
     def dotts(self, text, ofname):
         if False:
@@ -312,32 +298,22 @@ class TTS():
         else:
             tts_voc, so_voc = self.vocoder, None
         writer = TTSSoundOutput(self.model.config.num_mel_bins,
-                                self.model.device,
+                                self.device,
                                 vocoder=so_voc)
         writer.enable_datalog(ofname)
         writer.start()
 
-        speaker_embeddings = self.get_rand_voice()
+        speaker_embeddings = self.hsrt.get_rand_voice()
 
-        inputs = self.processor(text=text, return_tensors="pt").to(self.model.device)
-        speech = self.model.generate_speech_rt(inputs["input_ids"], writer.soundout,
+        inputs = self.processor(text=text, return_tensors="pt").to(self.device)
+        speech = self.generate_speech_rt(inputs["input_ids"], writer.soundout,
                                                speaker_embeddings,
                                                vocoder=tts_voc)
         writer.soundout(TTSSMarkerEnd())
 
     def get_pkt_proc(self):
-        writer = TTSSoundOutput(self.model.config.num_mel_bins,
-                                self.model.device)
+        writer = TTSSoundOutput(0, self.device)
         return writer
-
-    def play_tts(self, text, writer, speaker=None):
-        inputs = self.processor(text=text,
-                                return_tensors="pt").to(self.model.device)
-        if speaker is None:
-            speaker = self.get_rand_voice()
-        self.model.generate_speech_rt(inputs["input_ids"], writer.soundout,
-                                  speaker,
-                                  vocoder=self.vocoder)
 
 
 if __name__ == '__main__':
