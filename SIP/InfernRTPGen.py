@@ -43,6 +43,7 @@ class InfernRTPGen(Thread):
     userv = None
     target = None
     worker = None
+    dl_file = None
 
     def __init__(self, tts, sess_term):
         self.tts = tts
@@ -58,10 +59,15 @@ class InfernRTPGen(Thread):
             self.state = RTPGenRun
             self.state_lock.release()
             return
-        self.worker = self.tts.start_pkt_proc(self.send_pkt)
+        wrkr = self.tts.get_pkt_proc()
+        wrkr.set_pkt_send_f(self.send_pkt)
+        if self.dl_file is not None:
+            wrkr.enable_datalog(self.dl_file)
+        wrkr.start()
+        self.worker = wrkr
         self.text = text
         self.state_lock.release()
-        Thread.start(self)
+        super().start()
 
     def send_pkt(self, pkt):
         self.userv.send_to(pkt, self.target)
