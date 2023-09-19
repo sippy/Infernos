@@ -2,3 +2,9 @@ git+https://github.com/sippy/librtpsynth.git
 git+https://github.com/sippy/b2bua.git@Infernos_fixes
 transformers>=4.*
 datasets>=2.*
+torch>=2.*
+soundfile>=0.12.*
+torchaudio>=2.*
+scipy>=1.*
+inflect>=7.*
+sentencepiece>=0.1.*
