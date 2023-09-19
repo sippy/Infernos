@@ -106,6 +106,8 @@ class TTSSoundOutput(threading.Thread):
     num_mel_bins = None
     pkg_send_f = None
     dl_ofname = None
+    state_lock: threading.Lock = None
+    has_ended = False
 
     def __init__(self, num_mel_bins, device, vocoder=None, filter_out=False):
         self.itime = monotonic()
@@ -118,6 +120,7 @@ class TTSSoundOutput(threading.Thread):
         self.samplerate = 16000
         if filter_out:
             self.o_flt = get_PBF(self.samplerate)
+        self.state_lock = threading.Lock()
         super().__init__(target=self.consume_audio)
         self.daemon = True
 
@@ -126,6 +129,17 @@ class TTSSoundOutput(threading.Thread):
 
     def set_pkt_send_f(self, pkt_send_f):
         self.pkt_send_f = pkt_send_f
+
+    def ended(self):
+        self.state_lock.acquire()
+        t = self.has_ended
+        self.state_lock.release()
+        return t
+
+    def end(self):
+        self.state_lock.acquire()
+        self.has_ended = True
+        self.state_lock.release()
 
     def soundout(self, chunk):
         #print(f'soundout: {monotonic():4.3f}')
@@ -162,7 +176,7 @@ class TTSSoundOutput(threading.Thread):
         chunk = torch.empty(0).to(self.device)
         chunk_o = torch.empty(0).to(self.device)
         rsynth = RtpSynth(out_sr, out_ft)
-        while True:
+        while not self.ended():
             try:
                 chunk_n = self.data_queue.get(timeout=0.03)
             except queue.Empty:
@@ -255,8 +269,12 @@ class TTSSoundOutput(threading.Thread):
                 #print(len(pkt))
                 if self.debug:
                     print(f'consume_audio({len(chunk_o)}), etime = {etime}, ptime = {ptime}')
+                if self.ended():
+                    break
                 if ptime > etime:
                     sleep(ptime - etime)
+                    if self.ended():
+                        break
                     ctime = monotonic()
                     if self.debug:
                         print(f'consume_audio, sleep({ptime - etime})')

@@ -38,7 +38,7 @@ RTPGenStop = 3
 class InfernRTPGen(Thread):
     tts = None
     ptime = 0.030
-    state_lock = Lock()
+    state_lock: Lock = None
     state = RTPGenInit
     userv = None
     target = None
@@ -46,6 +46,7 @@ class InfernRTPGen(Thread):
     dl_file = None
 
     def __init__(self, tts, sess_term):
+        self.state_lock = Lock()
         self.tts = tts
         self.sess_term = sess_term
         super().__init__()
@@ -103,6 +104,8 @@ class InfernRTPGen(Thread):
                 self.tts.tts_rt(p, self.worker.soundout,
                                 speaker)
                 self.worker.soundout(TTSSMarkerNewSent())
+        if self.get_state() == RTPGenStop:
+            self.worker.end()
         self.worker.soundout(TTSSMarkerEnd())
         self.worker.join()
         ED2.callFromThread(self.sess_term)
