@@ -90,6 +90,7 @@ class InfernUAS(object):
         self._o = iao
         udsc, udsoc = SipTransactionManager.model_udp_server
         udsoc.nworkers = 1
+        SipConf.my_uaname = 'Infernos'
         stm =  SipTransactionManager(self.sippy_c, self.recvRequest)
         self.sippy_c['_sip_tm'] = stm
         self.body = MsgBody(body_txt)
