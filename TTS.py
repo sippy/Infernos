@@ -1,5 +1,8 @@
 from datasets import load_dataset
-import intel_extension_for_pytorch as ipex
+try:
+    import intel_extension_for_pytorch as ipex
+except ModuleNotFoundError:
+    ipex = None
 import torch
 import soundfile as sf
 import os.path
@@ -280,17 +283,18 @@ from utils import load_checkpoint, scan_checkpoint
 
 class TTS(HelloSippyRT):
     checkpoint_path = 'cp_hifigan.test'
-    device = 'xpu'
+    device = 'cuda' if ipex is None else 'xpu'
 
     def __init__(self):
         super().__init__(self.device)
         cp_g = scan_checkpoint('cp_hellosippy.test', 'g_')
         state_dict_g = load_checkpoint(cp_g, self.device)
         self.chunker.load_state_dict(state_dict_g['generator'])
-        self.model = ipex.optimize(self.model)
-        self.vocoder = ipex.optimize(self.vocoder)
-        #self.chunker = ipex.optimize(self.chunker)
-        #raise Exception(f"{type(hsrt.chunker)}")
+        if ipex is not None:
+            self.model = ipex.optimize(self.model)
+            self.vocoder = ipex.optimize(self.vocoder)
+            #self.chunker = ipex.optimize(self.chunker)
+            #raise Exception(f"{type(hsrt.chunker)}")
 
     def dotts(self, text, ofname):
         if False:
