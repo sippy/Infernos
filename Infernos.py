@@ -28,13 +28,13 @@ if __name__ == '__main__':
     try:
         opts, args = getopt(sys.argv[1:], 'fl:p:n:L:s:u:P:i:')
     except GetoptError:
-        print('usage: pel_collect.py [-l addr] [-p port] [-n addr] [-f] [-L logfile] [-u authname [-P authpass]]\n' \
+        print('usage: Infernos.py [-l addr] [-p port] [-n addr] [-f] [-L logfile] [-u authname [-P authpass]]\n' \
           '                   [-i pidfile]')
         sys.exit(1)
     sdev = None
     authname = None
     authpass = None
-    logfile = '/var/log/pel_collect.log'
+    logfile = '/var/log/Infernos.log'
     pidfile = None
     iuac = InfernUASConf()
     foreground = False
