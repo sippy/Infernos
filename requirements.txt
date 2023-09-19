@@ -1,3 +1,4 @@
 git+https://github.com/sippy/librtpsynth.git
 git+https://github.com/sippy/b2bua.git@Infernos_fixes
 transformers>=4.*
+datasets>=2.*
