@@ -50,13 +50,13 @@ if __name__ == '__main__':
         elif o == '-n':
             if a.startswith('['):
                 parts = a.split(']', 1)
-                iuac.nh_add = [parts[0] + ']', 5060]
+                iuac.nh_addr = [parts[0] + ']', 5060]
                 parts = parts[1].split(':', 1)
             else:
                 parts = a.split(':', 1)
                 iuac.nh_addr = [parts[0], 5060]
             if len(parts) == 2:
-                iuac.nh_add[1] = int(parts[1])
+                iuac.nh_addr[1] = int(parts[1])
         elif o == '-s':
             sdev = a
         elif o == '-u':
@@ -91,5 +91,5 @@ if __name__ == '__main__':
     #pio.sstart_cb = pua.sess_started
     #pio.send_cb = pua.sess_ended
     #pio.start()
-    ED2.loop()
+    exit(ED2.loop())
 
