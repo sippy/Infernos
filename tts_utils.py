@@ -26,6 +26,7 @@ def human_readable_time():
     # Convert day of the month and year to words
     day_of_month = number_to_words(int(now.strftime('%d')))
     year = number_to_words(int(now.strftime('%Y')))
+    year = year.replace('-', ' ')
 
     # Convert hour and minute to words
     if now.hour < 12:
@@ -57,7 +58,7 @@ wq_fixes = (
     ('i-sy,', 'iiisy,'), ('i-zy,', 'iiizzy,'),
     ('Agent Smith As', 'As'), ('.*edit[]] ', ''),
     ('Trinity: .*', ''), ('ar-riage', 'arrrrrrriage'),
-    ('Dialogue The ', 'The '),
+    ('Dialogue The ', 'The '), ('cra-zy', 'craaaazy',),
 )
 
 class ECFail(Exception):
