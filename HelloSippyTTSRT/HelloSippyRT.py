@@ -7,6 +7,7 @@ from transformers import SpeechT5ForTextToSpeech, SpeechT5PreTrainedModel, \
 from transformers.models.speecht5.modeling_speecht5 import \
         SpeechT5EncoderWithSpeechPrenet
 from datasets import load_dataset
+from threading import Lock
 import torch.nn as nn
 
 GenerateSpeech_cb = Callable[[torch.FloatTensor], None]
@@ -26,19 +27,23 @@ def _generate_speech_rt(
     encoder_attention_mask = torch.ones_like(input_values)
 
     model = hsrt.model
+    hsrt.cuda_lock.acquire()
     encoder_out = model.speecht5.encoder(
         input_values=input_values,
         attention_mask=encoder_attention_mask,
         return_dict=True,
     )
+    hsrt.cuda_lock.release()
 
     encoder_last_hidden_state = encoder_out.last_hidden_state
 
     # downsample encoder attention mask
     if isinstance(model.speecht5.encoder, SpeechT5EncoderWithSpeechPrenet):
+        hsrt.cuda_lock.acquire()
         encoder_attention_mask = model.speecht5.encoder.prenet._get_feature_vector_attention_mask(
             encoder_out[0].shape[1], encoder_attention_mask
         )
+        hsrt.cuda_lock.release()
 
     maxlen = int(encoder_last_hidden_state.size(1) * maxlenratio / model.config.reduction_factor)
     minlen = int(encoder_last_hidden_state.size(1) * minlenratio / model.config.reduction_factor)
@@ -68,6 +73,7 @@ def _generate_speech_rt(
         idx += 1
 
         # Run the decoder prenet on the entire output sequence.
+        hsrt.cuda_lock.acquire()
         decoder_hidden_states = model.speecht5.decoder.prenet(output_sequence, speaker_embeddings)
 
         # Run the decoder layers on the last element of the prenet output.
@@ -96,6 +102,7 @@ def _generate_speech_rt(
 
         # Predict the probability that this is the stop token.
         prob = model.speech_decoder_postnet.prob_out(last_decoder_output).sigmoid()
+        hsrt.cuda_lock.release()
 
         # Finished when stop token or maximum length is reached.
         theend = theend_cb = False
@@ -105,6 +112,7 @@ def _generate_speech_rt(
         if (len(spectrogram) >= output_len and len(spectrogram) + prfs.size(0) >= chunk_size + eframes) \
           or (theend and len(spectrogram) > 0):
             _s = spectrogram.unsqueeze(0)
+            hsrt.cuda_lock.acquire()
             _s = model.speech_decoder_postnet.postnet(_s)
             _s = _s.squeeze(0)
             #print(_s.size(0), prfs.size(0), _s.device)
@@ -151,6 +159,7 @@ def _generate_speech_rt(
             elif qlen > 1 and output_len < 128:
                 output_len *= 2
             spectrogram = torch.zeros(0, model.config.num_mel_bins).to(model.device)
+            hsrt.cuda_lock.release()
         if theend or theend_cb:
             break
 
@@ -212,6 +221,7 @@ class HelloSippyRT():
     chunker: AmendmentNetwork
     vocoder: SpeechT5HifiGan
     model: SpeechT5ForTextToSpeech
+    cuda_lock = Lock()
     def __init__(self, device):
         self.processor = SpeechT5Processor.from_pretrained("microsoft/speecht5_tts")
         mc = SpeechT5Config(max_speech_positions=4000)
