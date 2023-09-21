@@ -71,12 +71,46 @@ class InfernUASConf(object):
 
 prompts = [f'{human_readable_time()}', 'Welcome to Infernos.'] + smith_set() + hal_set() #+ t900_set() 
 
+from sippy.Core.EventDispatcher import ED2
+
+def good(*a):
+    #ED2.breakLoop(0)
+    pass
+
+def bad(*a):
+    #ED2.breakLoop(1)
+    pass
+
+class InfernSession(object):
+    rserv = None
+    rgen = None
+    uaA = None
+
+    def __init__(self, rtp_laddr, tts):
+        rserv_opts = Udp_server_opts((rtp_laddr, 0), self.rtp_received)
+        rserv_opts.nworkers = 1
+        self.rserv = Udp_server({}, rserv_opts)
+        self.rgen = InfernRTPGen(tts, self.sess_term)
+        self.rgen.dl_file = 'Infernos.check.wav'
+
+    def rtp_received(self, data, address, udp_server, rtime):
+        pass
+
+    def sess_term(self, ua=None, rtime=None, origin=None, result=0):
+        print('disconnected')
+        if self.rgen is None:
+            return
+        self.rgen.stop()
+        self.rserv.shutdown()
+        self.rserv = None
+        self.rgen = None
+        if ua is None:
+            self.uaA.disconnect()
+
 class InfernUAS(object):
     _o = None
     ua = None
     body = None
-    rgen = None
-    rserv = None
     ragent = None
     tts = None
     sippy_c = None
@@ -100,33 +134,21 @@ class InfernUAS(object):
         caddr = local4remote(proxy)
         cport = self.sippy_c['_sip_port']
         contact = SipURL(username = iao.cli, host = caddr, port = cport)
-        ragent = SipRegistrationAgent(self.sippy_c, aor, contact, user = iao.authname, passw = iao.authpass)
+        ragent = SipRegistrationAgent(self.sippy_c, aor, contact,
+                user=iao.authname, passw=iao.authpass,
+                rok_cb=good, rfail_cb=bad)
         ragent.rmsg.getHFBody('to').getUrl().username = iao.cld
         ragent.doregister()
-
-    def sess_term(self, ua=None, rtime=None, origin=None, result=0):
-        print('disconnected')
-        if self.rgen is None:
-            return
-        self.rgen.stop()
-        self.rserv.shutdown()
-        self.rserv = None
-        self.rgen = None
-        if ua is None:
-            self.uaA.disconnect()
-
-    def rtp_received(self, data, address, udp_server, rtime):
-        pass
 
     def recvRequest(self, req, sip_t):
         if req.getMethod() in ('NOTIFY', 'PING'):
             # Whynot?
             return (req.genResponse(200, 'OK'), None, None)
         if req.getMethod() == 'INVITE':
-            if self.rserv != None:
-                return (req.genResponse(486, 'Busy Here'), None, None)
+            #if self.rserv != None:
+            #    return (req.genResponse(486, 'Busy Here'), None, None)
             # New dialog
-            self.uaA = UA(self.sippy_c, self.recvEvent, disc_cbs = (self.sess_term,))
+            self.uaA = UA(self.sippy_c, self.recvEvent)
             self.uaA.recvRequest(req, sip_t)
             return
         return (req.genResponse(501, 'Not Implemented'), None, None)
@@ -140,16 +162,14 @@ class InfernUAS(object):
             sect = sdp_body.content.sections[0]
             rtp_target = (sect.c_header.addr, sect.m_header.port)
             rtp_laddr = local4remote(rtp_target[0])
-            rserv_opts = Udp_server_opts((rtp_laddr, 0), self.rtp_received)
-            rserv_opts.nworkers = 1
-            self.rserv = Udp_server({}, rserv_opts)
-            self.rgen = InfernRTPGen(self.tts, self.sess_term)
-            self.rgen.dl_file = 'Infernos.check.wav'
-            self.rgen.start(prompts, self.rserv, rtp_target)
+            isess = InfernSession(rtp_laddr, self.tts)
+            isess.uaA = ua
+            isess.rgen.start(prompts, isess.rserv, rtp_target)
             sect = self.body.content.sections[0]
-            sect.c_header.addr = self.rserv.uopts.laddress[0]
-            sect.m_header.port = self.rserv.uopts.laddress[1]
+            sect.c_header.addr = isess.rserv.uopts.laddress[0]
+            sect.m_header.port = isess.rserv.uopts.laddress[1]
             self.body.content.o_header = SdpOrigin()
             oevent = CCEventConnect((200, 'OK', self.body))
+            ua.disc_cbs = (isess.sess_term,)
             ua.recvEvent(oevent)
             return
