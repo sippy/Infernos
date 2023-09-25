@@ -1,5 +1,5 @@
 git+https://github.com/sippy/librtpsynth.git
-git+https://github.com/sippy/b2bua.git@opensipit
+git+https://github.com/sippy/b2bua.git
 transformers>=4.*
 datasets>=2.*
 torch>=2.*
