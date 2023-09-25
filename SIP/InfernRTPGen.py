@@ -90,22 +90,40 @@ class InfernRTPGen(Thread):
         else:
             text = self.text
         self.state_lock.release()
+        from time import sleep
         for i, p in enumerate(text):
             sents = p.split('|')
             speaker = self.tts.get_rand_voice()
             for si, p in enumerate(sents):
                 if self.get_state() == RTPGenStop:
                     break
-                if si > 0:
-                    from time import sleep
-                    sleep(0.5)
-                    #print('sleept')
+                #if si > 0:
+                #    from time import sleep
+                #    sleep(0.5)
+                #    #print('sleept')
                 print('Playing', p)
                 self.tts.tts_rt(p, self.worker.soundout,
                                 speaker)
                 self.worker.soundout(TTSSMarkerNewSent())
-        if self.get_state() == RTPGenStop:
-            self.worker.end()
+                while self.get_state() != RTPGenStop and \
+                        self.worker.data_queue.qsize() > 3:
+                    sleep(0.3)
+                print(f'get_frm_ctrs={self.worker.get_frm_ctrs()}')
+                print(f'data_queue.qsize()={self.worker.data_queue.qsize()}')
+        while True:
+            if self.get_state() == RTPGenStop:
+                self.worker.end()
+                break
+            if self.worker.data_queue.qsize() > 0:
+                sleep(0.1)
+                continue
+            cntrs = self.worker.get_frm_ctrs()
+            if cntrs[0] < cntrs[1]:
+                print(f'{cntrs[0]} < {cntrs[1]}')
+                sleep(0.01)
+                continue
+            break
+
         self.worker.soundout(TTSSMarkerEnd())
         self.worker.join()
         ED2.callFromThread(self.sess_term)
