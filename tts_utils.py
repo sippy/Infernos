@@ -59,6 +59,7 @@ wq_fixes = (
     ('Agent Smith As', 'As'), ('.*edit[]] ', ''),
     ('Trinity: .*', ''), ('ar-riage', 'arrrrrrriage'),
     ('Dialogue The ', 'The '), ('cra-zy', 'craaaazy',),
+    ('[%] ', ' percent '),
 )
 
 class ECFail(Exception):
@@ -109,6 +110,10 @@ def wq_getscript(film, character, section=1):
 def hal_set():
     contents = wq_getscript('2001: A Space Odyssey', 'HAL')
     return [s.replace('. ', '.|') for s in contents]
+
+def bender_set(season=1):
+    contents = wq_getscript(f'Futurama/Season_{season}', 'Bender')
+    return [s for s in contents if len(s) > 16]
 
 def smith_set():
     contents = wq_getscript('The Matrix', 'Agent Smith', section=4)
