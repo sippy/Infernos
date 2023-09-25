@@ -107,6 +107,8 @@ class TTSSoundOutput(threading.Thread):
     pkg_send_f = None
     dl_ofname = None
     state_lock: threading.Lock = None
+    frames_rcvd = 0
+    frames_prcsd = 0
     has_ended = False
 
     def __init__(self, num_mel_bins, device, vocoder=None, filter_out=False):
@@ -141,6 +143,18 @@ class TTSSoundOutput(threading.Thread):
         self.has_ended = True
         self.state_lock.release()
 
+    def update_frm_ctrs(self, rcvd_inc=0, prcsd_inc=0):
+        self.state_lock.acquire()
+        self.frames_rcvd += rcvd_inc
+        self.frames_prcsd += prcsd_inc
+        self.state_lock.release()
+
+    def get_frm_ctrs(self):
+        self.state_lock.acquire()
+        res = (self.frames_rcvd, self.frames_prcsd)
+        self.state_lock.release()
+        return res
+
     def soundout(self, chunk):
         #print(f'soundout: {monotonic():4.3f}')
         #return (0, False)
@@ -174,6 +188,7 @@ class TTSSoundOutput(threading.Thread):
         nchunk = 0
         btime = None
         chunk = torch.empty(0).to(self.device)
+        prev_chunk_len = 0
         chunk_o = torch.empty(0).to(self.device)
         rsynth = RtpSynth(out_sr, out_ft)
         while not self.ended():
@@ -185,6 +200,8 @@ class TTSSoundOutput(threading.Thread):
                 break
             if isinstance(chunk_n, TTSSMarkerNewSent):
                 #btime = None
+                prcsd_inc=chunk.size(0) + (chunk_o.size(0) * 2)
+                self.update_frm_ctrs(prcsd_inc=prcsd_inc)
                 chunk = chunk[:0]
                 chunk_o = chunk_o[:0]
                 ptime = 0.0
@@ -193,6 +210,7 @@ class TTSSoundOutput(threading.Thread):
                 rsynth.resync()
                 rsynth.set_mbt(1)
                 continue
+            self.update_frm_ctrs(rcvd_inc=chunk_n.size(0))
             ctime = monotonic()
 
             if self.dl_ofname is not None:
@@ -234,7 +252,9 @@ class TTSSoundOutput(threading.Thread):
             if stime is None:
                 stime = ctime
 
+            sz = chunk_o_n.size(0)
             chunk_o_n = resampler(chunk_o_n)
+            assert chunk_o_n.size(0) == sz / 2
             #print('chunk_o_n', chunk_o_n.min(), chunk_o_n.max(), chunk_o_n.float().mean())
             ##_chunk_o_n = (chunk_o_n * 32768).to(torch.int16)
             ##print(_chunk_o_n[:10])
@@ -250,6 +270,7 @@ class TTSSoundOutput(threading.Thread):
             chunk = chunk[:0]
 
             while chunk_o.size(0) >= out_fsize:
+                self.update_frm_ctrs(prcsd_inc=out_fsize*2)
                 packet = chunk_o[:out_fsize]
                 chunk_o = chunk_o[out_fsize:]
 
