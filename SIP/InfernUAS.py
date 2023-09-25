@@ -42,7 +42,8 @@ from .InfernRTPGen import InfernRTPGen
 import sys
 
 from TTS import TTS
-from tts_utils import human_readable_time, hal_set, smith_set, t900_set
+from tts_utils import human_readable_time, hal_set, smith_set, t900_set, \
+        bender_set
 
 body_txt = 'v=0\r\n' + \
   'o=- 380960 380960 IN IP4 192.168.22.95\r\n' + \
@@ -54,6 +55,8 @@ body_txt = 'v=0\r\n' + \
   'a=ptime:30\r\n' + \
   'a=sendrecv\r\n' + \
   '\r\n'
+model_body = MsgBody(body_txt)
+model_body.parse()
 
 class InfernUASConf(object):
     cli = 'infernos_uas'
@@ -69,7 +72,8 @@ class InfernUASConf(object):
         self.laddr = SipConf.my_address
         self.lport = SipConf.my_port
 
-prompts = [f'{human_readable_time()}', 'Welcome to Infernos.'] + smith_set() + hal_set() #+ t900_set() 
+prompts = [f'{human_readable_time()}', 'Welcome to Infernos.'] + bender_set() + \
+        smith_set() + hal_set() #+ t900_set() 
 
 from sippy.Core.EventDispatcher import ED2
 
@@ -81,33 +85,65 @@ def bad(*a):
     #ED2.breakLoop(1)
     pass
 
-class InfernSession(object):
-    rserv = None
-    rgen = None
-    uaA = None
+class InfernTTSUAS(UA):
+    _rserv = None
+    _rgen = None
+    #_rtp_target = None
 
-    def __init__(self, rtp_laddr, tts):
+    def __init__(self, sippy_c, tts, req, sip_t):
+        self._rgen = InfernRTPGen(tts, self.sess_term)
+        self._rgen.dl_file = 'Infernos.check.wav'
+        super().__init__(sippy_c, self.outEvent)
+        assert sip_t.noack_cb is None
+        sip_t.noack_cb = self.sess_term
+        self.recvRequest(req, sip_t)
+
+    def outEvent(self, event, ua):
+        if not isinstance(event, CCEventTry):
+            #ua.disconnect()
+            return
+        #if isinstance(event, CCEventConnect):
+        #    #self._rgen.start(prompts, self._rserv, self._rtp_target)
+        #    return
+        cId, cli, cld, sdp_body, auth, caller_name = event.getData()
+        if sdp_body == None:
+            ua.disconnect()
+            return
+        sdp_body.parse()
+        sect = sdp_body.content.sections[0]
+        rtp_target = (sect.c_header.addr, sect.m_header.port)
+        rtp_laddr = local4remote(rtp_target[0])
+        #self._rtp_target = rtp_target
         rserv_opts = Udp_server_opts((rtp_laddr, 0), self.rtp_received)
         rserv_opts.nworkers = 1
-        self.rserv = Udp_server({}, rserv_opts)
-        self.rgen = InfernRTPGen(tts, self.sess_term)
-        self.rgen.dl_file = 'Infernos.check.wav'
+        self._rserv = Udp_server({}, rserv_opts)
+        #isess = InfernSession(rtp_laddr, self.tts)
+        #    isess.uaA = ua
+        body = model_body.getCopy()
+        sect = body.content.sections[0]
+        sect.c_header.addr = self._rserv.uopts.laddress[0]
+        sect.m_header.port = self._rserv.uopts.laddress[1]
+        body.content.o_header = SdpOrigin()
+        oevent = CCEventConnect((200, 'OK', body))
+        self.disc_cbs = (self.sess_term,)
+        self._rgen.start(prompts, self._rserv, rtp_target)
+        return self.recvEvent(oevent)
 
     def rtp_received(self, data, address, udp_server, rtime):
         pass
 
     def sess_term(self, ua=None, rtime=None, origin=None, result=0):
         print('disconnected')
-        if self.rgen is None:
+        if self._rgen is None:
             return
-        self.rgen.stop()
-        self.rserv.shutdown()
-        self.rserv = None
-        self.rgen = None
-        if ua is None:
-            self.uaA.disconnect()
+        self._rgen.stop()
+        self._rserv.shutdown()
+        self._rserv = None
+        self._rgen = None
+        if ua != self:
+            self.disconnect()
 
-class InfernUAS(object):
+class InfernSIP(object):
     _o = None
     ua = None
     body = None
@@ -127,8 +163,6 @@ class InfernUAS(object):
         SipConf.my_uaname = 'Infernos'
         stm =  SipTransactionManager(self.sippy_c, self.recvRequest)
         self.sippy_c['_sip_tm'] = stm
-        self.body = MsgBody(body_txt)
-        self.body.parse()
         proxy, port = self.sippy_c['nh_addr']
         aor = SipURL(username = iao.cli, host = proxy, port = port)
         caddr = local4remote(proxy)
@@ -148,28 +182,6 @@ class InfernUAS(object):
             #if self.rserv != None:
             #    return (req.genResponse(486, 'Busy Here'), None, None)
             # New dialog
-            self.uaA = UA(self.sippy_c, self.recvEvent)
-            self.uaA.recvRequest(req, sip_t)
+            isess = InfernTTSUAS(self.sippy_c, self.tts, req, sip_t)
             return
         return (req.genResponse(501, 'Not Implemented'), None, None)
-
-    def recvEvent(self, event, ua):
-        if isinstance(event, CCEventTry):
-            cId, cli, cld, sdp_body, auth, caller_name = event.getData()
-            if sdp_body == None:
-                return
-            sdp_body.parse()
-            sect = sdp_body.content.sections[0]
-            rtp_target = (sect.c_header.addr, sect.m_header.port)
-            rtp_laddr = local4remote(rtp_target[0])
-            isess = InfernSession(rtp_laddr, self.tts)
-            isess.uaA = ua
-            isess.rgen.start(prompts, isess.rserv, rtp_target)
-            sect = self.body.content.sections[0]
-            sect.c_header.addr = isess.rserv.uopts.laddress[0]
-            sect.m_header.port = isess.rserv.uopts.laddress[1]
-            self.body.content.o_header = SdpOrigin()
-            oevent = CCEventConnect((200, 'OK', self.body))
-            ua.disc_cbs = (isess.sess_term,)
-            ua.recvEvent(oevent)
-            return

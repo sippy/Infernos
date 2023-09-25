@@ -7,7 +7,7 @@ from sippy.SipLogger import SipLogger
 
 sys.path.append('.')
 
-from SIP.InfernUAS import InfernUAS, InfernUASConf
+from SIP.InfernUAS import InfernSIP, InfernUASConf
 
 def patch_signals():
     import threading
@@ -84,7 +84,7 @@ if __name__ == '__main__':
     iuac.authname = authname
     iuac.authpass = authpass
     iuac.cli = iuac.cld = authname
-    iua = InfernUAS(iuac)
+    iua = InfernSIP(iuac)
     #pio = PELIO(lfile)
     #if sdev != None:
     #    pio.sdev = sdev
