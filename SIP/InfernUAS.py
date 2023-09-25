@@ -42,7 +42,7 @@ from .InfernRTPGen import InfernRTPGen
 import sys
 
 from TTS import TTS
-from tts_utils import human_readable_time, hal_set, smith_set, t900_set, \
+from utils.tts import human_readable_time, hal_set, smith_set, t900_set, \
         bender_set
 
 body_txt = 'v=0\r\n' + \
@@ -72,7 +72,7 @@ class InfernUASConf(object):
         self.laddr = SipConf.my_address
         self.lport = SipConf.my_port
 
-prompts = [f'{human_readable_time()}', 'Welcome to Infernos.'] + bender_set() + \
+prompts = [f'{human_readable_time()}', 'Welcome to Infernos.'] + bender_set(2) + \
         smith_set() + hal_set() #+ t900_set() 
 
 from sippy.Core.EventDispatcher import ED2

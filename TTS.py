@@ -318,7 +318,7 @@ class TTSSoundOutput(threading.Thread):
         sf.write(self.dl_ofname, data.detach().cpu().numpy(),
                  samplerate=self.samplerate)
 
-from utils import load_checkpoint, scan_checkpoint
+from utils.checkpoint import load_checkpoint, scan_checkpoint
 
 class TTS(HelloSippyRT):
     checkpoint_path = 'cp_hifigan.test'
