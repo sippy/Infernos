@@ -318,21 +318,15 @@ class TTSSoundOutput(threading.Thread):
         sf.write(self.dl_ofname, data.detach().cpu().numpy(),
                  samplerate=self.samplerate)
 
-from utils.checkpoint import load_checkpoint, scan_checkpoint
-
 class TTS(HelloSippyRT):
-    checkpoint_path = 'cp_hifigan.test'
     device = 'cuda' if ipex is None else 'xpu'
 
     def __init__(self):
         super().__init__(self.device)
-        cp_g = scan_checkpoint('cp_hellosippy.test', 'g_')
-        state_dict_g = load_checkpoint(cp_g, self.device)
-        self.chunker.load_state_dict(state_dict_g['generator'])
         if ipex is not None:
             self.model = ipex.optimize(self.model)
             self.vocoder = ipex.optimize(self.vocoder)
-            #self.chunker = ipex.optimize(self.chunker)
+            self.chunker = ipex.optimize(self.chunker)
             #raise Exception(f"{type(hsrt.chunker)}")
 
     def dotts(self, text, ofname):

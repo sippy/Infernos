@@ -6,6 +6,7 @@ from transformers import SpeechT5ForTextToSpeech, SpeechT5PreTrainedModel, \
         SpeechT5Config
 from transformers.models.speecht5.modeling_speecht5 import \
         SpeechT5EncoderWithSpeechPrenet
+from transformers import PretrainedConfig, PreTrainedModel
 from datasets import load_dataset
 from threading import Lock
 import torch.nn as nn
@@ -165,7 +166,11 @@ def _generate_speech_rt(
 
     return idx
 
-class AmendmentNetwork(nn.Module):
+class AmendmentNetworkConfig(PretrainedConfig):
+    pass
+
+class AmendmentNetwork(PreTrainedModel):
+    config_class = AmendmentNetworkConfig
     hidden_dim = 31
     kernel_size = 5
     pre_frames: int
@@ -175,9 +180,12 @@ class AmendmentNetwork(nn.Module):
     trim_pr: int
     trim_po: int
     output_size: int
-    def __init__(self, chunk_size=8, pre_frames=2, post_frames=2,
+    def __init__(self, config=None,
+                 chunk_size=8, pre_frames=2, post_frames=2,
                  frame_size=256, num_mels=80):
-        super(AmendmentNetwork, self).__init__()
+        if config is None:
+            config = self.config_class()
+        super().__init__(config)
 
         eframes = pre_frames + post_frames
         self.pre_frames = pre_frames
@@ -234,8 +242,10 @@ class HelloSippyRT():
                                                   config = _vc_conf).to(device)
         vocoder.eval()
         self.vocoder = vocoder
-        self.chunker = AmendmentNetwork().to(device)
-        self.chunker.eval()
+        chunker = AmendmentNetwork.from_pretrained("sobomax/speecht5-rt.post_vocoder.v1")
+        chunker = chunker.to(device)
+        chunker.eval()
+        self.chunker = chunker
         embeddings_dataset = load_dataset("Matthijs/cmu-arctic-xvectors", split="validation")
         self.speaker_embeddings = [torch.tensor(ed["xvector"]).unsqueeze(0)
                                        for ed in embeddings_dataset]
