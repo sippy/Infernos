@@ -27,7 +27,6 @@ from sippy.Core.EventDispatcher import ED2
 from threading import Thread, Lock
 
 import sys
-sys.path.append('..')
 from TTS import TTSSMarkerEnd, TTSSMarkerNewSent
 
 RTPGenInit = 0

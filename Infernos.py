@@ -32,6 +32,9 @@ if __name__ == '__main__':
           '                   [-i pidfile]')
         sys.exit(1)
     sdev = None
+    idir = os.path.realpath(sys.argv[0])
+    idir = os.path.dirname(idir)
+    sys.path.append(idir)
     authname = None
     authpass = None
     logfile = '/var/log/Infernos.log'
