@@ -35,23 +35,26 @@ from sippy.Udp_server import Udp_server, Udp_server_opts
 from sippy.SipURL import SipURL
 from sippy.SipRegistrationAgent import SipRegistrationAgent
 from sippy.SipConf import SipConf
+from sippy.Exceptions.SipParseError import SdpParseError
+from sippy.SdpMedia import MTAudio
 
 from sippy.misc import local4remote
 
 from .InfernRTPGen import InfernRTPGen
-import sys
 
 from TTS import TTS
 from utils.tts import human_readable_time, hal_set, smith_set, t900_set, \
         bender_set
 
+ULAW_PT = 0
+ULAW_RM = 'PCMU/8000'
 body_txt = 'v=0\r\n' + \
   'o=- 380960 380960 IN IP4 192.168.22.95\r\n' + \
   's=-\r\n' + \
   'c=IN IP4 192.168.22.95\r\n' + \
   't=0 0\r\n' + \
-  'm=audio 16474 RTP/AVP 0\r\n' + \
-  'a=rtpmap:0 PCMU/8000\r\n' + \
+ f'm=audio 16474 RTP/AVP {ULAW_PT}\r\n' + \
+ f'a=rtpmap:0 {ULAW_RM}\r\n' + \
   'a=ptime:30\r\n' + \
   'a=sendrecv\r\n' + \
   '\r\n'
@@ -110,7 +113,12 @@ class InfernTTSUAS(UA):
             ua.disconnect()
             return
         sdp_body.parse()
-        sect = sdp_body.content.sections[0]
+        sects = [s for s in sdp_body.content.sections
+                 if s.m_header.type == MTAudio and
+                 ULAW_PT in s.m_header.formats]
+        if len(sects) == 0:
+            raise SdpParseError("only audio is supported at this time, sorry")
+        sect = sects[0]
         rtp_target = (sect.c_header.addr, sect.m_header.port)
         rtp_laddr = local4remote(rtp_target[0])
         #self._rtp_target = rtp_target
