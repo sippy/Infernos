@@ -24,19 +24,16 @@
 # SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 from sippy.UA import UA
-from sippy.CCEvents import CCEventDisconnect, CCEventTry
-from sippy.CCEvents import CCEventRing, CCEventConnect, CCEventPreConnect
+from sippy.CCEvents import CCEventTry, CCEventConnect, CCEventFail
 from sippy.SipTransactionManager import SipTransactionManager
-from sippy.SipCiscoGUID import SipCiscoGUID
-from sippy.SipCallId import SipCallId
 from sippy.MsgBody import MsgBody
 from sippy.SdpOrigin import SdpOrigin
 from sippy.Udp_server import Udp_server, Udp_server_opts
 from sippy.SipURL import SipURL
 from sippy.SipRegistrationAgent import SipRegistrationAgent
 from sippy.SipConf import SipConf
-from sippy.Exceptions.SipParseError import SdpParseError
 from sippy.SdpMedia import MTAudio
+from sippy.SipReason import SipReason
 
 from sippy.misc import local4remote
 
@@ -88,6 +85,14 @@ def bad(*a):
     #ED2.breakLoop(1)
     pass
 
+class InfernUASFailure(CCEventFail):
+    code = 488
+    msg = 'Not Acceptable Here'
+    def __init__(self, reason):
+        super().__init__((self.code, self.msg))
+        self.reason = SipReason(protocol='SIP', cause=self.code,
+                                reason=reason)
+
 class InfernTTSUAS(UA):
     _rserv = None
     _rgen = None
@@ -117,7 +122,9 @@ class InfernTTSUAS(UA):
                  if s.m_header.type == MTAudio and
                  ULAW_PT in s.m_header.formats]
         if len(sects) == 0:
-            raise SdpParseError("only audio is supported at this time, sorry")
+            event = InfernUASFailure("only G.711u audio is supported at this time, sorry")
+            self.recvEvent(event)
+            return
         sect = sects[0]
         rtp_target = (sect.c_header.addr, sect.m_header.port)
         rtp_laddr = local4remote(rtp_target[0])
