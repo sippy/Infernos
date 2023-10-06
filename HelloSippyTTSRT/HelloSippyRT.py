@@ -59,16 +59,14 @@ def _generate_speech_rt(
     ###stime_pre = None
     btime = monotonic()
     p_ch = hsrt.chunker
-    prfs = torch.zeros(p_ch.pre_frames, model.config.num_mel_bins,
+    _c =  hsrt.c_conf
+    prfs = torch.zeros(_c.pre_frames, model.config.num_mel_bins,
                       device=model.device)
-    pofs = torch.zeros(p_ch.post_frames, model.config.num_mel_bins,
+    pofs = torch.zeros(_c.post_frames, model.config.num_mel_bins,
                        device=model.device)
-    trim_pr = p_ch.pre_frames * p_ch.frame_size
-    trim_po = p_ch.post_frames * p_ch.frame_size
-    eframes = p_ch.pre_frames + p_ch.post_frames
-    oschedule = [p_ch.chunk_size, p_ch.chunk_size, p_ch.chunk_size*2]
+    oschedule = [_c.chunk_size, _c.chunk_size, _c.chunk_size*2]
     output_len = oschedule[0]
-    chunk_size = p_ch.chunk_size
+    chunk_size = _c.chunk_size
     vocoder = hsrt.vocoder
     while True:
         idx += 1
@@ -110,7 +108,7 @@ def _generate_speech_rt(
         if idx >= minlen and (int(sum(prob >= threshold)) > 0 or idx >= maxlen):
             theend = True
 
-        if (len(spectrogram) >= output_len and len(spectrogram) + prfs.size(0) >= chunk_size + eframes) \
+        if (len(spectrogram) >= output_len and len(spectrogram) + prfs.size(0) >= chunk_size + _c.eframes) \
           or (theend and len(spectrogram) > 0):
             _s = spectrogram.unsqueeze(0)
             hsrt.cuda_lock.acquire()
@@ -122,7 +120,7 @@ def _generate_speech_rt(
             if theend:
                 _s.append(pofs)
             _s = torch.cat(_s, dim=0)
-            extra_pad = (_s.size(0) - eframes) % chunk_size
+            extra_pad = (_s.size(0) - _c.eframes) % chunk_size
             assert extra_pad < chunk_size
             if extra_pad > 0:
                 extra_pad = chunk_size - extra_pad
@@ -131,24 +129,22 @@ def _generate_speech_rt(
                                     _s.size(1), device=_s.device)
                 _s = torch.cat((_s, _pofs), dim=0)
             outputs = []
-            while _s.size(0) >= eframes + chunk_size:
+            while _s.size(0) >= _c.eframes + chunk_size:
                 #print(_s.size(), _s.device)
-                _i = _s[:eframes + chunk_size, :]
+                _i = _s[:_c.eframes + chunk_size, :]
                 _o = vocoder(_i).unsqueeze(0)
                 _o = p_ch(_i, _o)
                 outputs.append(_o.squeeze(0))
-                #outputs.append(_o[trim_pr:-trim_po])
                 #print('out', _o.size(), outputs[-1].size())
                 _s = _s[chunk_size:, :]
             if extra_pad > 0:
-                ep_trim = extra_pad * p_ch.frame_size
+                ep_trim = extra_pad * _c.frame_size
                 assert outputs[-1].size(0) > ep_trim
                 outputs[-1] = outputs[-1][:-ep_trim]
             outputs = torch.cat(outputs, dim=0)
             #print('_s after:', _s.size(0))
-            assert _s.size(0) >= eframes and _s.size(0) < eframes + chunk_size
+            assert _s.size(0) >= _c.eframes and _s.size(0) < _c.eframes + chunk_size
             #print('prfs', prfs.size(), 'inputs', in_size, 'outputs', outputs.size(), '_s', _s.size())
-            #outputs = outputs[trim_pr:]
             #print(_s.shape, outputs.shape)
             prfs = _s
             #print(monotonic() - btime)
@@ -166,67 +162,86 @@ def _generate_speech_rt(
 
     return idx
 
-class AmendmentNetworkConfig(PretrainedConfig):
-    pass
-
-class AmendmentNetwork(PreTrainedModel):
-    config_class = AmendmentNetworkConfig
-    hidden_dim = 31
-    kernel_size = 5
-    pre_frames: int
-    post_frames: int
-    frame_size: int
+class AmendmentNetwork1Config(PretrainedConfig):
+    chunk_size = 8
+    pre_frames = 2
+    post_frames = 2
+    frame_size = 256
+    num_mels = 80
     chunk_size: int
     trim_pr: int
     trim_po: int
     output_size: int
-    def __init__(self, config=None,
-                 chunk_size=8, pre_frames=2, post_frames=2,
-                 frame_size=256, num_mels=80):
+    eframes: int
+
+    def __init__(self, *a, **ka):
+        super().__init__(*a, **ka)
+        self.eframes = self.pre_frames + self.post_frames
+        self.trim_pr = self.pre_frames * self.frame_size
+        self.trim_po = self.post_frames * self.frame_size
+        self.output_size = self.chunk_size * self.frame_size
+
+class SimpleResidualBlock(nn.Module):
+    def __init__(self, channels):
+        super().__init__()
+        self.conv1 = nn.Conv1d(channels, channels, kernel_size=3, stride=1,
+                               padding=1, dilation=1)
+        self.conv2 = nn.Conv1d(channels, channels, kernel_size=3, stride=1,
+                               padding=3, dilation=3)
+
+    def forward(self, x, lrelu):
+        assert lrelu is not None
+        residual = x
+        x = lrelu(x)
+        x = self.conv1(x)
+        x = lrelu(x)
+        x = self.conv2(x)
+        x += residual
+        return x
+
+class AmendmentNetwork1(PreTrainedModel):
+    config_class = AmendmentNetwork1Config
+    def __init__(self, config=None):
         if config is None:
             config = self.config_class()
         super().__init__(config)
+        _c = self._c = config
 
-        eframes = pre_frames + post_frames
-        self.pre_frames = pre_frames
-        self.post_frames = post_frames
-        self.frame_size = frame_size
-        self.chunk_size = chunk_size
-        self.trim_pr = pre_frames * frame_size
-        self.trim_po = post_frames * frame_size
-        input_size_m = num_mels * (chunk_size + eframes)
-        input_size_a = frame_size * (chunk_size + eframes)
-        self.output_size = chunk_size * frame_size
-
-        self.fc1_mel = nn.Linear(input_size_m, self.hidden_dim)
-        self.fc1_audio = nn.Linear(input_size_a, self.hidden_dim)
-        self.fc2 = nn.Linear(2 * self.hidden_dim, self.hidden_dim * 2)
-        self.conv_out = nn.Conv1d(in_channels=self.hidden_dim * 2,
-                                  out_channels=self.output_size,
-                                  kernel_size=self.kernel_size,
-                                  padding=self.kernel_size // 2)
-        self.lrelu = nn.LeakyReLU(0.01)  # default negative slope is 0.01
+        self.conv_pre_m = nn.Conv1d(_c.num_mels, 32, kernel_size=3, stride=1, padding=1)
+        self.conv_pre_a = nn.Conv1d(_c.frame_size, 160, kernel_size=3, stride=1, padding=1)
+        self.upsampler = nn.ModuleList([
+          nn.ConvTranspose1d(192, 128, kernel_size=8, stride=4, padding=2),
+          nn.ConvTranspose1d(128, 64, kernel_size=8, stride=4, padding=2),
+        ])
+        self.lrelu = nn.LeakyReLU(0.01)
+        self.resblock = SimpleResidualBlock(64)
+        self.post_conv = nn.Conv1d(in_channels=64, out_channels=_c.frame_size,
+                                   kernel_size=8, stride=24, padding=0)
 
     def forward(self, mel, audio):
-        batch_size = audio.size(0)
-
-        mel = mel.view(batch_size, -1)  # Flatten the mel input
-
-        mel_out = self.lrelu(self.fc1_mel(mel))
-        audio_out = self.lrelu(self.fc1_audio(audio))
-
-        combined = torch.cat([mel_out, audio_out], dim=1)
-
-        x = self.lrelu(self.fc2(combined))
-        x = x.unsqueeze(2)
-        x = self.conv_out(x).squeeze(2)
-        amended_audio = audio[:, self.trim_pr:-self.trim_po] * self.lrelu(x)
-
-        return amended_audio.clamp(min=-1.0, max=1.0)
+        batch_size, total_length = audio.size()
+        T = mel.size(-1)
+        #print(Exception(f"BP: ms:{mel.size()} as:{audio.size()}"))
+        audio_reshaped = audio.view(batch_size, self._c.frame_size, -1)
+        mel = mel.view(batch_size, T, -1)
+        #print(Exception(f"BP: ms:{mel.size()} as:{audio.size()} ars:{audio_reshaped.size()}"))
+        x_mel = self.conv_pre_m(mel)
+        x_audio = self.conv_pre_a(audio_reshaped)
+        am_comb = torch.cat((x_mel, x_audio), dim=1)
+        for i, layer in enumerate(self.upsampler):
+            am_comb = self.lrelu(am_comb)
+            am_comb = layer(am_comb)
+        am_comb = self.resblock(am_comb, self.lrelu)
+        am_comb = self.lrelu(am_comb)
+        am_comb = self.post_conv(am_comb).squeeze(-1)
+        am_comb = self.lrelu(am_comb).view(batch_size, -1)
+        audio = audio[:, self._c.trim_pr:-self._c.trim_po] * am_comb
+        return audio.tanh()
 
 class HelloSippyRT():
     processor: SpeechT5Processor
-    chunker: AmendmentNetwork
+    chunker: AmendmentNetwork1
+    c_conf: AmendmentNetwork1Config
     vocoder: SpeechT5HifiGan
     model: SpeechT5ForTextToSpeech
     cuda_lock = Lock()
@@ -242,7 +257,9 @@ class HelloSippyRT():
                                                   config = _vc_conf).to(device)
         vocoder.eval()
         self.vocoder = vocoder
-        chunker = AmendmentNetwork.from_pretrained("sobomax/speecht5-rt.post_vocoder.v1")
+        self.c_conf = AmendmentNetwork1Config()
+        chunker = AmendmentNetwork1.from_pretrained("sobomax/speecht5-rt.post_vocoder.v2",
+                                                    config=self.c_conf)
         chunker = chunker.to(device)
         chunker.eval()
         self.chunker = chunker
