@@ -47,7 +47,12 @@ blazing-fast future, free from lag.
 
 &nbsp;
 
-    python Infernos.py
+    python Infernos.py -f
+
+4.  Use SIP device or software such as Linphone to place a SIP
+    call to `sip:anything@localhost:5060`. Replace `localhost`
+    with a local IP of machine running Infernos if testing over
+    LAN.
 
 Ready to experience real-time inferencing?
 
