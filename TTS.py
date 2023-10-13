@@ -81,9 +81,6 @@ def numpy_audioop_helper(x, xdtype, func, width, ydtype):
     y = np.frombuffer(func(xi.tobytes(), width), dtype=ydtype)
     return y.reshape(xi.shape)
 
-def audioop_ulaw_compress(x):
-    return numpy_audioop_helper(x, np.int16, audioop.lin2ulaw, 2, np.uint8)
-
 class TTSSMarkerGeneric():
     pass
 
@@ -93,8 +90,21 @@ class TTSSMarkerNewSent(TTSSMarkerGeneric):
 class TTSSMarkerEnd(TTSSMarkerGeneric):
     pass
 
+ulaw_ct = torch.zeros(65536, dtype=torch.uint8)
+for i in range(-32768, 32768):
+    pcm_data = i.to_bytes(2, 'little', signed=True)
+    ulaw_data = audioop.lin2ulaw(pcm_data, 2)
+    ulaw_value = ulaw_data[0]  # Get the byte value from bytes
+    ulaw_ct[i + 32768] = ulaw_value  # Shift index to make it non-negative
 
-TSO_SESSEND = None
+def float_to_ulaw(audio_tensor):
+    # Scale from [-1, 1] to [-32768, 32767]
+    audio_scaled = torch.clamp(audio_tensor * 32767.0, -32768, 32767).to(torch.int16)
+
+    # Shift and look up in the conversion table
+    audio_ulaw = ulaw_ct[(audio_scaled + 32768).long()]
+
+    return audio_ulaw
 
 class TTSSoundOutput(threading.Thread):
     pre_frames = 2
@@ -112,6 +122,9 @@ class TTSSoundOutput(threading.Thread):
     has_ended = False
 
     def __init__(self, num_mel_bins, device, vocoder=None, filter_out=False):
+        global ulaw_ct
+        if ulaw_ct.device != device:
+            ulaw_ct = ulaw_ct.to(device)
         self.itime = monotonic()
         self.vocoder = vocoder
         self.num_mel_bins = num_mel_bins
@@ -255,12 +268,6 @@ class TTSSoundOutput(threading.Thread):
             sz = chunk_o_n.size(0)
             chunk_o_n = resampler(chunk_o_n)
             assert chunk_o_n.size(0) == sz / 2
-            #print('chunk_o_n', chunk_o_n.min(), chunk_o_n.max(), chunk_o_n.float().mean())
-            ##_chunk_o_n = (chunk_o_n * 32768).to(torch.int16)
-            ##print(_chunk_o_n[:10])
-            ##print(audioop_ulaw_compress(_chunk_o_n.cpu().numpy())[:10])
-            ##chunk_o_n = codec(chunk_o_n)
-            #print('chunk_o_n', chunk_o_n.min(), chunk_o_n.max(), chunk_o_n.float().mean())
             chunk_o = torch.cat((chunk_o, chunk_o_n), dim=0)
 
             etime = ctime - stime
@@ -278,9 +285,9 @@ class TTSSoundOutput(threading.Thread):
                 etime = ctime - stime
 
                 #print(packet.size())
-                packet = (packet * 20000).to(torch.int16)
+                #packet = (packet * 20000).to(torch.int16)
                 #packet = packet.byte().cpu().numpy()
-                packet = audioop_ulaw_compress(packet.cpu().numpy())
+                packet = float_to_ulaw(packet).cpu().numpy()
                 #print('packet', packet.min(), packet.max(), packet[:10])
                 packet = packet.tobytes()
                 #print(len(packet), packet[:10])
