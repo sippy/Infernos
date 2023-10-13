@@ -72,7 +72,7 @@ class InfernUASConf(object):
         self.laddr = SipConf.my_address
         self.lport = SipConf.my_port
 
-prompts = [f'{human_readable_time()}', 'Welcome to Infernos.'] + bender_set(2) + \
+prompts = ['Welcome to Infernos.'] + bender_set(2) + \
         smith_set() + hal_set() #+ t900_set() 
 
 from sippy.Core.EventDispatcher import ED2
@@ -105,6 +105,9 @@ class InfernTTSUAS(UA):
         assert sip_t.noack_cb is None
         sip_t.noack_cb = self.sess_term
         self.recvRequest(req, sip_t)
+
+    def getPrompts(self):
+        return [f'{human_readable_time()}',] + prompts
 
     def outEvent(self, event, ua):
         if not isinstance(event, CCEventTry):
@@ -141,7 +144,7 @@ class InfernTTSUAS(UA):
         body.content.o_header = SdpOrigin()
         oevent = CCEventConnect((200, 'OK', body))
         self.disc_cbs = (self.sess_term,)
-        self._rgen.start(prompts, self._rserv, rtp_target)
+        self._rgen.start(self.getPrompts(), self._rserv, rtp_target)
         return self.recvEvent(oevent)
 
     def rtp_received(self, data, address, udp_server, rtime):
