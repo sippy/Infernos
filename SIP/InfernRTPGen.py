@@ -24,41 +24,29 @@
 # SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 from sippy.Core.EventDispatcher import ED2
-from threading import Thread, Lock
 
 import sys
 from TTS import TTSSMarkerEnd, TTSSMarkerNewSent
+from .InfernWrkThread import InfernWrkThread, RTPWrkTInit, RTPWrkTRun, RTPWrkTStop
 
-RTPGenInit = 0
-RTPGenRun = 1
-RTPGenSuspend = 2
-RTPGenStop = 3
-
-class InfernRTPGen(Thread):
+class InfernRTPGen(InfernWrkThread):
     tts = None
     ptime = 0.030
-    state_lock: Lock = None
-    state = RTPGenInit
     userv = None
     target = None
     worker = None
     dl_file = None
 
     def __init__(self, tts, sess_term):
-        self.state_lock = Lock()
+        super().__init__()
         self.tts = tts
         self.sess_term = sess_term
-        super().__init__()
         self.setDaemon(True)
 
     def start(self, text, userv, target):
         self.state_lock.acquire()
         self.target = target
         self.userv = userv
-        if self.state == RTPGenSuspend:
-            self.state = RTPGenRun
-            self.state_lock.release()
-            return
         wrkr = self.tts.get_pkt_proc()
         wrkr.set_pkt_send_f(self.send_pkt)
         if self.dl_file is not None:
@@ -72,29 +60,18 @@ class InfernRTPGen(Thread):
     def send_pkt(self, pkt):
         self.userv.send_to(pkt, self.target)
 
-    def get_state(self):
-        self.state_lock.acquire()
-        state = self.state
-        self.state_lock.release()
-        return state
-
     def run(self):
-        self.state_lock.acquire()
-        if self.state == RTPGenStop:
-            self.state_lock.release()
-            return
-        self.state = RTPGenRun
+        super().thread_started()
         if type(self.text) == str:
             text = (self.text,)
         else:
             text = self.text
-        self.state_lock.release()
         from time import sleep
         for i, p in enumerate(text):
             sents = p.split('|')
             speaker = self.tts.get_rand_voice()
             for si, p in enumerate(sents):
-                if self.get_state() == RTPGenStop:
+                if self.get_state() == RTPWrkTStop:
                     break
                 #if si > 0:
                 #    from time import sleep
@@ -104,13 +81,13 @@ class InfernRTPGen(Thread):
                 self.tts.tts_rt(p, self.worker.soundout,
                                 speaker)
                 self.worker.soundout(TTSSMarkerNewSent())
-                while self.get_state() != RTPGenStop and \
+                while self.get_state() != RTPWrkTStop and \
                         self.worker.data_queue.qsize() > 3:
                     sleep(0.3)
                 print(f'get_frm_ctrs={self.worker.get_frm_ctrs()}')
                 print(f'data_queue.qsize()={self.worker.data_queue.qsize()}')
         while True:
-            if self.get_state() == RTPGenStop:
+            if self.get_state() == RTPWrkTStop:
                 self.worker.end()
                 break
             if self.worker.data_queue.qsize() > 0:
@@ -130,24 +107,5 @@ class InfernRTPGen(Thread):
         del self.worker
 
     def stop(self):
-        self.state_lock.acquire()
-        pstate = self.state
-        if self.state in (RTPGenRun, RTPGenSuspend):
-            self.state = RTPGenStop
-        self.state_lock.release()
-        if pstate in (RTPGenRun, RTPGenSuspend):
-            self.join()
+        super().stop()
         self.userv = None
-        self.state_lock.acquire()
-        self.state = RTPGenInit
-        self.state_lock.release()
-
-    def suspend(self):
-        self.state_lock.acquire()
-        if self.state == RTPGenRun:
-            self.state = RTPGenSuspend
-        else:
-            etext = 'suspend() is called in the wrong state: %s' % self.state
-            self.state_lock.release()
-            raise Exception(etext)
-        self.state_lock.release()
