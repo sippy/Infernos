@@ -38,6 +38,7 @@ from sippy.SipReason import SipReason
 from sippy.misc import local4remote
 
 from .InfernRTPGen import InfernRTPGen
+from .InfernRTPIngest import InfernRTPIngest
 
 from TTS import TTS
 from utils.tts import human_readable_time, hal_set, smith_set, t900_set, \
@@ -95,11 +96,13 @@ class InfernUASFailure(CCEventFail):
 
 class InfernTTSUAS(UA):
     _rserv = None
-    _rgen = None
+    _rgen: InfernRTPGen = None
+    _ring: InfernRTPIngest = None
     #_rtp_target = None
 
     def __init__(self, sippy_c, tts, req, sip_t):
         self._rgen = InfernRTPGen(tts, self.sess_term)
+        self._ring = InfernRTPIngest()
         self._rgen.dl_file = 'Infernos.check.wav'
         super().__init__(sippy_c, self.outEvent)
         assert sip_t.noack_cb is None
@@ -132,7 +135,7 @@ class InfernTTSUAS(UA):
         rtp_target = (sect.c_header.addr, sect.m_header.port)
         rtp_laddr = local4remote(rtp_target[0])
         #self._rtp_target = rtp_target
-        rserv_opts = Udp_server_opts((rtp_laddr, 0), self.rtp_received)
+        rserv_opts = Udp_server_opts((rtp_laddr, 0), self._ring.rtp_received)
         rserv_opts.nworkers = 1
         self._rserv = Udp_server({}, rserv_opts)
         #isess = InfernSession(rtp_laddr, self.tts)
@@ -145,15 +148,14 @@ class InfernTTSUAS(UA):
         oevent = CCEventConnect((200, 'OK', body))
         self.disc_cbs = (self.sess_term,)
         self._rgen.start(self.getPrompts(), self._rserv, rtp_target)
+        self._ring.start()
         return self.recvEvent(oevent)
-
-    def rtp_received(self, data, address, udp_server, rtime):
-        pass
 
     def sess_term(self, ua=None, rtime=None, origin=None, result=0):
         print('disconnected')
         if self._rgen is None:
             return
+        self._ring.stop()
         self._rgen.stop()
         self._rserv.shutdown()
         self._rserv = None
