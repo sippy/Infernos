@@ -24,63 +24,6 @@ from rtpsynth.RtpSynth import RtpSynth
 
 import audioop
 
-def get_LPF(fs = 16000, cutoff = 4000.0):
-    def butter_lowpass(cutoff, fs, order=5):
-        nyquist = 0.5 * fs
-        normal_cutoff = cutoff / nyquist
-        b, a = butter(order, normal_cutoff, btype='low', analog=False)
-        return b
-    order = 6
-    filter_kernel = butter_lowpass(cutoff, fs, order)
-    filter_kernel = torch.tensor(filter_kernel, dtype=torch.float32).unsqueeze(0).unsqueeze(0).to('xpu')
-    return filter_kernel
-
-@torch.no_grad()
-def get_PBF0(fs = 16000, l_cut = 50.0, h_cut = 4000.0):
-    # Create a simple PyTorch model with a single Conv1d layer
-    class PassBandFilter(nn.Module):
-        def __init__(self, coefficients):
-            super(PassBandFilter, self).__init__()
-            self.conv1 = nn.Conv1d(in_channels=1, out_channels=1, kernel_size=len(coefficients), padding=len(coefficients)//2, bias=False)
-
-            # Load the filter coefficients into the Conv1d layer
-            self.conv1.weight.data = torch.Tensor(coefficients).float().view(1, 1, -1)
-
-        def forward(self, x):
-            return self.conv1(x)
-
-    # Design a Butterworth pass-band filter
-    order = 6  # Order of the filter
-
-    b, a = butter(order, [l_cut, h_cut], btype='band', fs=fs)
-    w, h = freqz(b, a, fs=fs)
-
-    center_freq = np.sqrt(l_cut * h_cut)
-    w_center = 2 * np.pi * center_freq / fs
-    gain_at_center = np.abs(np.polyval(b, np.exp(1j * w_center)) / np.polyval(a, np.exp(1j * w_center)))
-
-    b /= gain_at_center
-
-    # Initialize the PyTorch model
-    return PassBandFilter(b).to('xpu')
-
-def get_PBF(fs = 16000, l_cut = 75.0, h_cut = 4000.0):
-    numtaps = 1024  # Number of filter taps (coefficients)
-    coeffs = firwin(numtaps, [l_cut, h_cut], pass_zero='bandpass', fs=fs)
-
-    # Convert to PyTorch tensor
-    filter_kernel = torch.tensor(coeffs, dtype=torch.float32).view(1, 1, -1).to('xpu')
-    return filter_kernel
-
-def numpy_audioop_helper(x, xdtype, func, width, ydtype):
-    '''helper function for using audioop buffer conversion in numpy'''
-    xi = np.asanyarray(x).astype(xdtype)
-    if np.any(x != xi):
-        xinfo = np.iinfo(xdtype)
-        raise ValueError("input must be %s [%d..%d]" % (xdtype, xinfo.min, xinfo.max))
-    y = np.frombuffer(func(xi.tobytes(), width), dtype=ydtype)
-    return y.reshape(xi.shape)
-
 class TTSSMarkerGeneric():
     pass
 
@@ -110,18 +53,16 @@ class TTSSoundOutput(threading.Thread):
     pre_frames = 2
     _frame_size = 256
     debug = False
-    dl_ofname: str
+    dl_ofname: str = None
     data_log = None
-    o_flt = None
     num_mel_bins = None
     pkg_send_f = None
-    dl_ofname = None
     state_lock: threading.Lock = None
     frames_rcvd = 0
     frames_prcsd = 0
     has_ended = False
 
-    def __init__(self, num_mel_bins, device, vocoder=None, filter_out=False):
+    def __init__(self, num_mel_bins, device, vocoder=None):
         global ulaw_ct
         if ulaw_ct.device != device:
             ulaw_ct = ulaw_ct.to(device)
@@ -133,8 +74,6 @@ class TTSSoundOutput(threading.Thread):
         #    self.data, _ = sf.read(self.ofname)
         self.data_queue = queue.Queue()
         self.samplerate = 16000
-        if filter_out:
-            self.o_flt = get_PBF(self.samplerate)
         self.state_lock = threading.Lock()
         super().__init__(target=self.consume_audio)
         self.daemon = True
@@ -197,11 +136,9 @@ class TTSSoundOutput(threading.Thread):
         resampler = T.Resample(orig_freq=self.samplerate,
                                new_freq=out_sr
                                ).to(self.device)
-        codec = T.MuLawEncoding().to(self.device)
         nchunk = 0
         btime = None
         chunk = torch.empty(0).to(self.device)
-        prev_chunk_len = 0
         chunk_o = torch.empty(0).to(self.device)
         rsynth = RtpSynth(out_sr, out_ft)
         while not self.ended():
@@ -310,23 +247,16 @@ class TTSSoundOutput(threading.Thread):
     def __del__(self):
         print('__del__')
         #self.worker_thread.join()
-        if self.o_flt is not None:
-            print(self.o_flt.size(2))
         if self.data_log is None:
             return
         amplification_dB = 20.0
         data = self.data_log #* (10 ** (amplification_dB / 20))
-        #data = self.o_flt(data.unsqueeze(0).unsqueeze(0)).squeeze()
-        if self.o_flt is not None:
-            data = F.conv1d(data.unsqueeze(0).unsqueeze(0),
-                            self.o_flt,
-                            padding=(self.o_flt.size(2) - 1) // 2)
-            data = data.squeeze()
         sf.write(self.dl_ofname, data.detach().cpu().numpy(),
                  samplerate=self.samplerate)
 
 class TTS(HelloSippyRT):
     device = 'cuda' if ipex is None else 'xpu'
+    debug = False
 
     def __init__(self):
         super().__init__(self.device)
@@ -344,7 +274,8 @@ class TTS(HelloSippyRT):
         writer = TTSSoundOutput(self.model.config.num_mel_bins,
                                 self.device,
                                 vocoder=so_voc)
-        writer.enable_datalog(ofname)
+        if self.debug:
+            writer.enable_datalog(ofname)
         writer.start()
 
         speaker_embeddings = self.hsrt.get_rand_voice()

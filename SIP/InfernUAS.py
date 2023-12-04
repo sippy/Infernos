@@ -103,7 +103,7 @@ class InfernTTSUAS(UA):
     def __init__(self, sippy_c, tts, req, sip_t):
         self._rgen = InfernRTPGen(tts, self.sess_term)
         self._ring = InfernRTPIngest()
-        self._rgen.dl_file = 'Infernos.check.wav'
+        #self._rgen.dl_file = 'Infernos.check.wav'
         super().__init__(sippy_c, self.outEvent)
         assert sip_t.noack_cb is None
         sip_t.noack_cb = self.sess_term
