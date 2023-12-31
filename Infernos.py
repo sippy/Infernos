@@ -82,7 +82,7 @@ if __name__ == '__main__':
     if pidfile != None:
         open(pidfile, 'w').write('%d' % os.getpid())
 
-    iuac.logger = SipLogger('Infernos')
+    iuac.logger = SipLogger('Infernos',  logfile = os.path.expanduser('~/.Infernos.log'))
 
     iuac.authname = authname
     iuac.authpass = authpass
