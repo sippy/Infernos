@@ -7,9 +7,13 @@ from .InfernWrkThread import InfernWrkThread, RTPWrkTRun
 class InfernRTPIngest(InfernWrkThread):
     pkt_queue: Queue = None
     jb_size: int = 8
-    def __init__(self):
+    input_sr: int = 8000
+    output_sr: int
+    codec: str = "PCMU"
+    def __init__(self, output_sr: int = 16000):
         super().__init__()
         self.pkt_queue = Queue()
+        self.output_sr = output_sr
 #        self.start()
 
     def run(self):
