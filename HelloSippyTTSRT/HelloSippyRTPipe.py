@@ -1,14 +1,12 @@
 try: import intel_extension_for_pytorch as ipex
 except ModuleNotFoundError: ipex = None
 
-import sys
+import sys, random, weakref, uuid
 from typing import Union, List, Any, Callable, Optional, Tuple
 import contextlib, time
-import random
 from os.path import exists as path_exists
-import weakref
 from queue import Queue, Empty as QueueEmpty
-import uuid
+from dataclasses import dataclass
 
 import numpy as np
 
@@ -25,14 +23,15 @@ except ModuleNotFoundError:
 
 from HelloSippyTTSRT.HelloSippyRT import AmendmentNetwork1, AmendmentNetwork1Config
 
-def pad_tensor_to_target(tensor, target_size):
+def pad_tensor_to_target(tensor, target_size, pre=False):
     if tuple(tensor.shape) == tuple(target_size): return tensor
     # Get the current size of the tensor
     current_size = tensor.size()
     # Calculate the padding needed for each dimension
     padding = []
     for c, t in zip(current_size[::-1], target_size[::-1]):  # Reverse to start from the last dimension
-        padding.extend([0, max(t - c, 0)])
+        pad = max(t - c, 0)
+        padding.extend([pad, 0] if pre else [0, pad])
     # Apply padding
     return F.pad(tensor, tuple(padding), "constant", 0.0)
 
@@ -61,17 +60,19 @@ class HelloSippyPlayRequest(SessDispatchCmd):
 
 class HelloSippyPipeState:
     session:uuid.UUID
-    speaker_embeddings:Optional[torch.Tensor] = None
-    encoder_last_hidden_state:Optional[torch.Tensor] = None
-    output_sequence:Optional[torch.Tensor] = None
-    encoder_attention_mask:Optional[torch.Tensor] = None
-    pre_frames:Optional[torch.Tensor] = None
-    ends_at:int = -1
-    minlen:Optional[int] = None
-    maxlen:Optional[int] = None
     dispatch:weakref.ref[Queue]
+    speaker_embeddings:torch.Tensor
+    encoder_last_hidden_state:torch.Tensor
+    output_sequence:torch.Tensor
+    encoder_attention_mask:torch.Tensor
+    pre_frames:torch.Tensor
+    starts_at:torch.Tensor
+    ends_at:torch.Tensor
+    minlen:torch.Tensor
+    maxlen:torch.Tensor
 
     def __init__(self, pp:HelloSippyRTPipe, req:HelloSippyPlayRequest):
+        def make_tensor(x): return torch.tensor([x], dtype=torch.long, device=pp.model.device)
         self.session, self.dispatch = req.session, req.dispatch
         inputs = pp.processor(text=req.text, return_tensors="pt")["input_ids"]
         self.speaker_embeddings = req.speaker.to(pp.model.device)
@@ -82,9 +83,11 @@ class HelloSippyPipeState:
             return_dict=True,
         )
         self.encoder_last_hidden_state = encoder_out.last_hidden_state
-        self.pre_frames = torch.zeros(1, pp.pre_nframes, pp.model.config.num_mel_bins, device=pp.model.device)
-        self.maxlen = int(self.encoder_last_hidden_state.size(1) * pp.maxlenratio / pp.model.config.reduction_factor)
-        self.minlen = int(self.encoder_last_hidden_state.size(1) * pp.minlenratio / pp.model.config.reduction_factor)
+        self.pre_frames = torch.zeros(1, pp.pre_nframes + pp.post_nframes, pp.model.config.num_mel_bins, device=pp.model.device)
+        self.starts_at = make_tensor(pp.post_nframes // pp.model.config.reduction_factor)
+        self.ends_at = make_tensor(-1)
+        self.maxlen = make_tensor(int(self.encoder_last_hidden_state.size(1) * pp.maxlenratio / pp.model.config.reduction_factor))
+        self.minlen = make_tensor(int(self.encoder_last_hidden_state.size(1) * pp.minlenratio / pp.model.config.reduction_factor))
 
         # Start the output sequence with a mel spectrum that is all zeros.
         self.output_sequence = self.encoder_last_hidden_state.new_zeros(1, 1, pp.model.config.num_mel_bins)
@@ -92,35 +95,48 @@ class HelloSippyPipeState:
 class HelloSippyPipeStateBatched:
     speaker_embeddings:torch.Tensor
     encoder_last_hidden_state:torch.Tensor
-    output_sequence:torch.Tensor = None
-    past_key_values:List[Union[torch.Tensor, None]] = None
-    encoder_attention_mask:Union[torch.Tensor,None] = None
-    pre_frames:Union[torch.Tensor,None] = None
-    ends_at:Union[torch.Tensor,None] = None
-    minlen:[torch.Tensor,None] = None
-    maxlen:[torch.Tensor,None] = None
+    output_sequence:torch.Tensor
+    past_key_values:Optional[List[torch.Tensor]] = None
+    encoder_attention_mask:torch.Tensor
+    pre_frames:torch.Tensor
+    starts_at:torch.Tensor
+    ends_at:torch.Tensor
+    minlen:torch.Tensor
+    maxlen:torch.Tensor
     idx: int = 0
     dispatch:List[weakref.ref[Queue]]
-    res_queue:Optional[Queue] = None
     sessions:List[uuid.UUID]
 
     def __init__(self, states: List[HelloSippyPipeState], device):
-        self.speaker_embeddings = torch.cat([s.speaker_embeddings for s in states], dim=0)
-        encoder_last_hidden_states = [s.encoder_last_hidden_state for s in states]
-        encoder_attention_masks = [s.encoder_attention_mask for s in states]
-        max_d1 = max(mask.size(1) for mask in encoder_attention_masks)
-        padded_states = [pad_tensor_to_target(state, (state.size(0), max_d1, state.size(2))) for state in encoder_last_hidden_states]
-        padded_masks = [torch.nn.functional.pad(mask, (0, max_d1 - mask.size(1)), 'constant', 0) for mask in encoder_attention_masks]
-        self.encoder_last_hidden_state = torch.cat(padded_states, dim=0)
-        self.encoder_attention_mask = torch.cat(padded_masks, dim=0)
-        self.pre_frames = torch.cat([s.pre_frames for s in states], dim=0)
-        self.maxlen = torch.tensor([s.maxlen for s in states], dtype=torch.long, device=device)
-        self.minlen = torch.tensor([s.minlen for s in states], dtype=torch.long, device=device)
-        self.output_sequence = torch.cat([s.output_sequence for s in states], dim=0)
-        self.past_key_values = None
-        self.ends_at = torch.tensor([s.ends_at for s in states], dtype=torch.long, device=device)
-        self.idx = 0
+        self.merge(states)
+
+    def merge(self, states = List[HelloSippyPipeState]):
         self.dispatch = [s.dispatch for s in states]
+        max_statelen = max([x.encoder_attention_mask.size(1) for x in states])
+        for aname in ('speaker_embeddings', 'encoder_last_hidden_state', 'encoder_attention_mask', 'pre_frames', 'maxlen', 'minlen', 'output_sequence', 'starts_at', 'ends_at'):
+            aval = [getattr(s, aname) for s in states]
+            if aname in ('encoder_last_hidden_state', 'encoder_attention_mask'):
+                for ia in [ia for ia, a in enumerate(aval) if a.size(1) < max_statelen]:
+                    new_size = list(aval[ia].size())
+                    new_size[1] = max_statelen
+                    aval[ia] = pad_tensor_to_target(aval[ia], new_size)
+            #print(f'{aname=} {[x.shape for x in aval]=}')
+            setattr(self, aname, torch.cat(aval).contiguous())
+        #if self.past_key_values is not None:
+        #        batch_size = self.speaker_embeddings.size(0)
+        #        past_key_values = [list(x) for x in self.past_key_values]
+        #        for past_key_value, idx, t in [(x, i, _x) for x in past_key_values for i, _x in enumerate(x)]:
+        #            new_size = list(t.size())
+        #            new_size[0] = batch_size
+        #            if idx >= 2: new_size[2] = max_statelen
+        #            #new_size[-1] = max_statelen
+        #            assert id(past_key_value[idx]) == id(t)
+        #            past_key_value[idx] = pad_tensor_to_target(t, new_size)
+        #            #raise Exception(f"FIXME: NOT IMPLEMENTED: {past_key_value[idx].shape=}")
+        #        self.past_key_values = tuple([tuple(x) for x in past_key_values])
+        #if self.past_key_values is not None: print(f"FIXME: NOT IMPLEMENTED: {self.past_key_values[0][1].shape=} {self.past_key_values[1][0].shape=}")
+        #self.past_key_values = None
+        #print(f'{self.dispatch=}')
 
 import threading
 
@@ -136,7 +152,7 @@ class trp_thread(threading.Thread):
     def __init__(self, period:float=0.0, noreturn:bool=False):
         self.queue = Queue()
         if not noreturn: self.queue_out = Queue()
-        if period > 0.0: self.period = period #self.elp = ElPeriodic(1.0 / period)
+        if period > 0.0: self.elp = ElPeriodic(1.0 / period)
         super().__init__(target=self.__thread)
         self.daemon = True
         self.start()
@@ -167,7 +183,6 @@ class trp_thread(threading.Thread):
             if self.queue_out: self.queue_out.put(res)
             elif res[0]: raise res[0]
             if self.elp: self.elp.procrastinate()
-            if self.period and (et - st) < self.period: time.sleep(self.period - (et - st))
 
     def __del__(self):
         print('del')
@@ -247,37 +262,40 @@ class HelloSippyRTPipe:
     def savetensor(self, tensor:torch.Tensor, name:str):
         fname = f'{name}{self.saveidx}.npy'
         np.save(fname, tensor.cpu().numpy())
+
+    class WorkerState: state:Optional[HelloSippyPipeStateBatched]=None; live:Optional[List[uuid.UUID]]=None
   
     @trp_thread(noreturn=True)
-    def synchronize(self, state:Optional[HelloSippyPipeStateBatched], res_queue=None) -> None:
-        ssq = []
+    def synchronize(self, ws:Optional[WorkerState]) -> None:
+        if not ws: ws = self.WorkerState()
+        state = ws.state
+        if state: return (self.main_gen(ws), None)[-1]
+        ssq = [self._sync_queue.get(),]
         try:
             while True: ssq.append(self._sync_queue.get_nowait())
         except QueueEmpty: pass
         assert all(isinstance(x, SessCmd) for x in ssq)
         syncs, reqs = [x for x in ssq if isinstance(x, SessSyncCmd)], [x for x in ssq if not isinstance(x, SessSyncCmd)]
-        if len(syncs) == 0 and (not state or len(reqs) == 0): return (self.main_gen(state), None)[-1]
-        print(f'{len(syncs)=} {len(reqs)=} {syncs[-1]=}')
-        live = syncs[-1].live
-        if len(live) == 0: return (self.main_gen(None), None)[-1]
+        if len(syncs) == 0 and len(reqs) == 0: raise AssertionError(f'this could not be happening {ssq=}')
+        #print(f'{len(syncs)=} {len(reqs)=} {syncs=}')
+        ws.live = live = syncs[-1].live if len(syncs) > 0 else ws.live
+        if not live: return (self.synchronize(ws), None)[-1]
         reqs_live = [x for x in reqs if x.session in live]
-        if len(reqs_live) == 0: return (self.main_gen(state), None)[-1]
+        if len(reqs_live) == 0: return (self.synchronize(ws), None)[-1]
         with self.cuda_lock:
             new_states = [HelloSippyPipeState(self, r) for r in reqs_live]
-            if state: raise Exception("FIXME: NOT IMPLEMENTED")
-            state = HelloSippyPipeStateBatched(new_states, self.model.device)
-            state.res_queue = res_queue
+            #if state: state.mergein(new_states)
+            ws.state = HelloSippyPipeStateBatched(new_states, self.model.device)
         #raise Exception(f'{len(ssq)=} {reqs_live=} {live=} {len(self.sessions)=}')
-        self.main_gen(state)
+        self.main_gen(ws)
 
-    @trp_thread(period=8*256*4/16000, noreturn=True)
-    def main_gen(self, state:Optional[HelloSippyPipeStateBatched]) -> None:
-        if not state: return (self.synchronize(None), None)[-1]
+    @trp_thread(noreturn=True)
+    def main_gen(self, ws:WorkerState) -> None:
+        state = ws.state
         with self.cuda_lock:
             batch_size = state.output_sequence.size(0)
             spectrogram = torch.zeros(batch_size, 0, self.model.config.num_mel_bins, device=self.model.device)
-            output_len = (self.chunk_size * 4) + (self.post_nframes if state.idx == 0 else 0)
-            while spectrogram.size(1) < output_len:
+            while spectrogram.size(1) < (self.chunk_size * 4):
                 decoder_hidden_states = self.model.speecht5.decoder.prenet(state.output_sequence, state.speaker_embeddings)[:, -1:]
                 decoder_out = self.model.speecht5.decoder.wrapped_decoder(
                     hidden_states=decoder_hidden_states,
@@ -310,15 +328,9 @@ class HelloSippyRTPipe:
                 #print(f"{(state.minlen <= state.idx)=} {(torch.sum(prob >= self.threshold, (1,)) > 0)=}")
                 #raise Exception(f"{(state.maxlen <= state.idx)=}")
                 state.ends_at = torch.where((state.ends_at < 0) & (state.minlen <= state.idx) & ((torch.sum(prob >= self.threshold, (1,)) > 0) | (state.maxlen <= state.idx)),
-                                             state.idx, state.ends_at)
+                                             state.idx+(self.pre_nframes+self.post_nframes)//self.model.config.reduction_factor, state.ends_at)
                 state.idx += 1
             spectrogram = self.model.speech_decoder_postnet.postnet(spectrogram)
-            ##range_tensor = torch.arange(spectrogram.shape[1], device=state.ends_at.device).unsqueeze(0).expand(batch_size, -1) + (state.idx - 1)
-            ##ends=state.ends_at.unsqueeze(1)
-            ##print(f'{range_tensor.shape=} {torch.nonzero(~ends)=}')
-            ##mask = ((range_tensor <= ends) | (ends < 0)).unsqueeze(-1)
-            ##spectrogram = torch.where(mask, spectrogram, 0.0)
-            #raise Exception(f'{spectrogram.shape=} {state.ends_at.shape=} {mask=}')
             spectrogram = torch.cat((state.pre_frames, spectrogram), dim=1)
             eframes = self.pre_nframes + self.post_nframes
             state.pre_frames = spectrogram[:, -eframes:, :]
@@ -327,45 +339,29 @@ class HelloSippyRTPipe:
             audio = self.vocoder(spectrogram)
             audio = self.chunker(spectrogram, audio)
             slices = audio.split(batch_size, dim=0)
-            state.audio = torch.cat(slices, dim=1)
-            #self.savetensor(state.audio, f'audio_{state.idx}_')
-        print(f'{state.ends_at.cpu().numpy()=} {state.audio.shape=}')
-
-        self.unbatch_and_dispatch(state)
+            audio = torch.cat(slices, dim=1)
+            state.audio = self.resampler(audio)
+        #print(f'{state.ends_at.shape=} {state.ends_at.cpu().numpy()=} {state.audio.shape=}')
+        self.unbatch_and_dispatch(ws)
 
     @trp_thread(noreturn=True)
-    def unbatch_and_dispatch(self, state: HelloSippyPipeStateBatched):
+    def unbatch_and_dispatch(self, ws:WorkerState):
+        state = ws.state
+        audio, sr_rr = state.audio, self.model_sr / self.dispatch_sr
+        end_idx = state.idx - 1
+        stepsize = int(256 * 2 / sr_rr)
         with self.cuda_lock:
-            audio, sr_rr = self.resampler(state.audio), self.model_sr / self.dispatch_sr
-            end_idx = state.idx - 1
-            eoff = (self.pre_nframes // self.model.config.reduction_factor)
-            eidx = end_idx - eoff
-            stepsize = int(256 * 2 / sr_rr)
             for i, cbq in [(i, cbq) for i, _cbq in enumerate(state.dispatch) if _cbq is not None and (cbq:=_cbq()) is not None]:
-                ends_at_rel = (end_idx - (ends_at + eoff if (ends_at:=state.ends_at[i].item()) >= 0 and ends_at <= eidx else end_idx)) * stepsize
-                if ends_at >= 0 and ends_at > eidx: print(f"gotcha {ends_at=} {eidx=}")
-                cbq.put(audio[i][ends_at_rel:])
-                if ends_at >= 0 and ends_at <= eidx:
+                startoff = max(0, (asize:=audio[i].size(0)) - ((state.idx - state.starts_at[i].item()) * stepsize))
+                endoff = min(asize, asize - (((state.idx - ends_at) * stepsize) if (ends_at:=state.ends_at[i].item()) >=0 else 0))
+                cbq.put(audio[i][startoff:endoff].cpu().numpy())
+                if ends_at >= 0 and ends_at <= end_idx:
                     cbq.put(None)
                     state.dispatch[i] = None
-            mask = ((state.ends_at < 0) | (state.ends_at > eidx))
-            if False and torch.sum(mask) < (state.ends_at.size(0) // 2):
-                for tn in ('speaker_embeddings', 'encoder_last_hidden_state', 'output_sequence',
-                        'encoder_attention_mask', 'pre_frames', 'ends_at', 'minlen', 'maxlen'):
-                    t = getattr(state, tn)
-                    t = t[mask].contiguous()
-                    setattr(state, tn, t)
-                past_key_values = [list(x) for x in state.past_key_values]
-                for past_key_value, idx, t in [(x, i, _x) for x in past_key_values for i, _x in enumerate(x)]:
-                    assert id(past_key_value[idx]) == id(t)
-                    past_key_value[idx] = t[mask].contiguous()
-                state.past_key_values = tuple([tuple(x) for x in past_key_values])
-                goodpos = torch.nonzero(mask).squeeze(1).tolist()
-                state.dispatch = [x for i, x in enumerate(state.dispatch) if i in goodpos]
-                state.eos_cb = [x for i, x in enumerate(state.eos_cb) if i in goodpos]
-            if torch.all(~mask):
-                if state.res_queue: state.res_queue.put(state)
-            else: self.synchronize(state)
+                mask = ((state.ends_at < 0) | (state.ends_at > end_idx))
+                if torch.all(~mask):
+                    ws.state = None
+        self.synchronize(ws)
 
     def get_rand_voice(self):
         s_index = torch.randint(0, len(self.speaker_embeddings), (1,)).item()
@@ -391,6 +387,7 @@ def seed_RNGs():
 @torch.no_grad()
 def main():
     import soundfile as sf
+    from time import monotonic
     seed_RNGs()
     from random import choices
     from utils.tts import smith_set, bender_set, hal_set
@@ -398,23 +395,31 @@ def main():
     prompts = choices([y for x in smith_set() + bender_set() + hal_set() for y in x.split('|')], k=n)
     #prompts = prompts
     #prompts = [prompts[0] for _ in range(n)]
+    @dataclass(frozen=True)
+    class ResFeedback: n:int; time_to_first_frame:float; time_to_last_frame:float; number_of_frames:int
     class res_cb(threading.Thread):
-        def __init__(self, n, name='dispatch'):
+        def __init__(self, n, name='dispatch', res_queue=None):
             super().__init__(target=self.__thread)
-            self.n, self.name = n, name
-            if self.name == 'dispatch': self.data = torch.empty(0)
+            self.n, self.name, self.res_queue = n, name, res_queue
+            if self.name == 'dispatch': self.data = np.empty(0)
             self.q = Queue()
             self.daemon = True
             self.start()
 
         def __thread(self):
-            while (y:=self.q.get()) is not None: self.data = torch.cat((self.data, y.cpu()))
-            self.eos()
+            st = monotonic()
+            time_to_first_frame = None
+            while (y:=self.q.get()) is not None:
+                #print(f'{self.name}{self.n}({y.shape=})')
+                self.data = np.concatenate((self.data, y), axis=0)
+                if time_to_first_frame is None: time_to_first_frame = monotonic() - st
+            self.eos(ResFeedback(self.n, time_to_first_frame, monotonic()-st, int(self.data.shape[0])))
 
-        def eos(self):
+        def eos(self, res:ResFeedback):
             sys.stdout.write(f'eos({self.n}) {self.data.shape=}\n')
             sys.stdout.flush()
-            sf.write(f'out_{self.n}.wav', self.data.numpy(), 8000, 'PCM_16')
+            sf.write(f'out_{self.n}.wav', self.data, 8000, 'PCM_16')
+            if self.res_queue: self.res_queue.put(res)
 
     params = {'hidden_dropout':0.0, 'positional_dropout':0.0, 'speech_decoder_prenet_dropout':0.0,
               'activation_dropout':0.0, 'encoder_layerdrop':0.0, 'decoder_layerdrop':0.0, 'attention_dropout':0.0,
@@ -427,13 +432,15 @@ def main():
 
     s1 = [sp.alloc_session() for i in range(50)]
     del s1
-    s2 = [((s:=sp.alloc_session()), (r:=res_cb(n)), s.play(p, r.q)) for n, p in enumerate(prompts)]
     res_queue = Queue()
-    sp.synchronize(None, res_queue=res_queue)
-    res = res_queue.get()
     from time import sleep
-    sleep(1)
-    return(1)
+    sp.synchronize(None)
+    s2 = [((s:=sp.alloc_session()), (r:=res_cb(n, res_queue=res_queue)), s.play(p, r.q), sleep(0.5)) for n, p in enumerate(prompts)]
+    for _ in range(len(s2)):
+        res = res_queue.get()
+        rtr = (res.time_to_last_frame - res.time_to_first_frame) / (res.number_of_frames / 8000)
+        print(f'Sess#{res.n}: {res.time_to_first_frame=}, {res.time_to_last_frame=}, {res.number_of_frames=} {rtr=}')
+    return(0)
 
     def init_states(states):
         d_callbacks = [res_cb(n, 'dispatch', lambda x:x[0].shape) for n, _ in enumerate(states)]
