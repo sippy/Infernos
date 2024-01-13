@@ -10,6 +10,12 @@ Harness the power of **I.N.F.E.R.N.O.S.** to transform audio, video, and
 text streams with state-of-the-art inference in an instant. Embrace a
 blazing-fast future, free from lag.
 
+## News
+
+Work is underway to scale TTS performance 50x. Stay tuned.
+
+I am going to present at FOSDEM 2024 (RTC track). See you all there!
+
 ## Features
 
 -   **Interactive:** Infernos isn't just another tool; it's an
