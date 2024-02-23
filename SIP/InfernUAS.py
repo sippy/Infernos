@@ -25,12 +25,9 @@
 
 from sippy.UA import UA
 from sippy.CCEvents import CCEventTry, CCEventConnect, CCEventFail
-from sippy.SipTransactionManager import SipTransactionManager
 from sippy.MsgBody import MsgBody
 from sippy.SdpOrigin import SdpOrigin
 from sippy.Udp_server import Udp_server, Udp_server_opts
-from sippy.SipURL import SipURL
-from sippy.SipRegistrationAgent import SipRegistrationAgent
 from sippy.SipConf import SipConf
 from sippy.SdpMedia import MTAudio
 from sippy.SipReason import SipReason
@@ -40,7 +37,6 @@ from sippy.misc import local4remote
 from .InfernRTPGen import InfernRTPGen
 from .InfernRTPIngest import InfernRTPIngest
 
-from TTS import TTS
 from utils.tts import human_readable_time, hal_set, smith_set, t900_set, \
         bender_set
 
@@ -75,16 +71,6 @@ class InfernUASConf(object):
 
 prompts = ['Welcome to Infernos.'] + bender_set(2) + \
         smith_set() + hal_set() #+ t900_set() 
-
-from sippy.Core.EventDispatcher import ED2
-
-def good(*a):
-    #ED2.breakLoop(0)
-    pass
-
-def bad(*a):
-    #ED2.breakLoop(1)
-    pass
 
 class InfernUASFailure(CCEventFail):
     code = 488
@@ -162,46 +148,3 @@ class InfernTTSUAS(UA):
         self._rgen = None
         if ua != self:
             self.disconnect()
-
-class InfernSIP(object):
-    _o = None
-    ua = None
-    body = None
-    ragent = None
-    tts = None
-    sippy_c = None
-
-    def __init__(self, iao):
-        self.sippy_c = {'nh_addr':tuple(iao.nh_addr),
-                        '_sip_address':iao.laddr,
-                        '_sip_port':iao.lport,
-                        '_sip_logger':iao.logger}
-        self.tts = TTS()
-        self._o = iao
-        udsc, udsoc = SipTransactionManager.model_udp_server
-        udsoc.nworkers = 1
-        SipConf.my_uaname = 'Infernos'
-        stm =  SipTransactionManager(self.sippy_c, self.recvRequest)
-        self.sippy_c['_sip_tm'] = stm
-        proxy, port = self.sippy_c['nh_addr']
-        aor = SipURL(username = iao.cli, host = proxy, port = port)
-        caddr = local4remote(proxy)
-        cport = self.sippy_c['_sip_port']
-        contact = SipURL(username = iao.cli, host = caddr, port = cport)
-        ragent = SipRegistrationAgent(self.sippy_c, aor, contact,
-                user=iao.authname, passw=iao.authpass,
-                rok_cb=good, rfail_cb=bad)
-        ragent.rmsg.getHFBody('to').getUrl().username = iao.cld
-        ragent.doregister()
-
-    def recvRequest(self, req, sip_t):
-        if req.getMethod() in ('NOTIFY', 'PING'):
-            # Whynot?
-            return (req.genResponse(200, 'OK'), None, None)
-        if req.getMethod() == 'INVITE':
-            #if self.rserv != None:
-            #    return (req.genResponse(486, 'Busy Here'), None, None)
-            # New dialog
-            isess = InfernTTSUAS(self.sippy_c, self.tts, req, sip_t)
-            return
-        return (req.genResponse(501, 'Not Implemented'), None, None)

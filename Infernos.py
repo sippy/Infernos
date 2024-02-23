@@ -7,7 +7,8 @@ from sippy.SipLogger import SipLogger
 
 sys.path.append('.')
 
-from SIP.InfernUAS import InfernSIP, InfernUASConf
+from SIP.InfernUAS import InfernUASConf
+from SIP.InfernSIP import InfernSIP
 
 def patch_signals():
     import threading
