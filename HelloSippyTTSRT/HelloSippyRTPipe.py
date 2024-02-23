@@ -58,9 +58,14 @@ class HelloSippyPlayRequest(SessDispatchCmd):
     dispatch:weakref.ref[Queue]
     def __init__(self, session_id:uuid.UUID, text:str, speaker:torch.Tensor, dispatch:weakref.ref[Queue]): self.text, self.speaker, self.dispatch = (super().__init__(session_id), text, speaker, dispatch)[1:] 
 
+def make_tensor(x, pp): return torch.tensor([x], dtype=torch.long, device=pp.model.device)
+
+def maybe_half(x): return x
+
 class HelloSippyPipeState:
     session:uuid.UUID
     dispatch:weakref.ref[Queue]
+    inputs:torch.Tensor
     speaker_embeddings:torch.Tensor
     encoder_last_hidden_state:torch.Tensor
     output_sequence:torch.Tensor
@@ -68,29 +73,15 @@ class HelloSippyPipeState:
     pre_frames:torch.Tensor
     starts_at:torch.Tensor
     ends_at:torch.Tensor
-    minlen:torch.Tensor
-    maxlen:torch.Tensor
 
     def __init__(self, pp:HelloSippyRTPipe, req:HelloSippyPlayRequest):
-        def make_tensor(x): return torch.tensor([x], dtype=torch.long, device=pp.model.device)
         self.session, self.dispatch = req.session, req.dispatch
-        inputs = pp.processor(text=req.text, return_tensors="pt")["input_ids"]
-        self.speaker_embeddings = req.speaker.to(pp.model.device)
-        self.encoder_attention_mask = torch.ones_like(inputs:=inputs.to(pp.model.device))
-        encoder_out = pp.model.speecht5.encoder(
-            input_values=inputs,
-            attention_mask=self.encoder_attention_mask,
-            return_dict=True,
-        )
-        self.encoder_last_hidden_state = encoder_out.last_hidden_state
-        self.pre_frames = torch.zeros(1, pp.pre_nframes + pp.post_nframes, pp.model.config.num_mel_bins, device=pp.model.device)
-        self.starts_at = make_tensor(pp.post_nframes // pp.model.config.reduction_factor)
-        self.ends_at = make_tensor(-1)
-        self.maxlen = make_tensor(int(self.encoder_last_hidden_state.size(1) * pp.maxlenratio / pp.model.config.reduction_factor))
-        self.minlen = make_tensor(int(self.encoder_last_hidden_state.size(1) * pp.minlenratio / pp.model.config.reduction_factor))
-
-        # Start the output sequence with a mel spectrum that is all zeros.
-        self.output_sequence = self.encoder_last_hidden_state.new_zeros(1, 1, pp.model.config.num_mel_bins)
+        self.inputs = pp.processor(text=req.text, return_tensors="pt")["input_ids"].to(pp.model.device)
+        self.speaker_embeddings = maybe_half(req.speaker).to(pp.model.device)
+        self.encoder_attention_mask = torch.ones_like(self.inputs, dtype=torch.int)
+        self.pre_frames = maybe_half(torch.zeros(1, pp.pre_nframes + pp.post_nframes, pp.model.config.num_mel_bins)).to(pp.model.device)
+        self.starts_at = make_tensor(pp.post_nframes // pp.model.config.reduction_factor, pp)
+        self.ends_at = make_tensor(-1, pp)
 
 class HelloSippyPipeStateBatched:
     speaker_embeddings:torch.Tensor
@@ -101,27 +92,38 @@ class HelloSippyPipeStateBatched:
     pre_frames:torch.Tensor
     starts_at:torch.Tensor
     ends_at:torch.Tensor
-    minlen:torch.Tensor
-    maxlen:torch.Tensor
+    minlen:int
+    maxlen:int
     idx: int = 0
     dispatch:List[weakref.ref[Queue]]
     sessions:List[uuid.UUID]
 
-    def __init__(self, states: List[HelloSippyPipeState], device):
-        self.merge(states)
+    def __init__(self, states: List[HelloSippyPipeState], pp:HelloSippyRTPipe):
+        self.merge(states, pp)
 
-    def merge(self, states = List[HelloSippyPipeState]):
+    def merge(self, states:List[HelloSippyPipeState], pp:HelloSippyRTPipe):
         self.dispatch = [s.dispatch for s in states]
         max_statelen = max([x.encoder_attention_mask.size(1) for x in states])
-        for aname in ('speaker_embeddings', 'encoder_last_hidden_state', 'encoder_attention_mask', 'pre_frames', 'maxlen', 'minlen', 'output_sequence', 'starts_at', 'ends_at'):
+        for aname in ('inputs', 'speaker_embeddings', 'encoder_attention_mask', 'pre_frames', 'starts_at', 'ends_at'):
             aval = [getattr(s, aname) for s in states]
-            if aname in ('encoder_last_hidden_state', 'encoder_attention_mask'):
+            if aname in ('inputs', 'encoder_attention_mask'):
                 for ia in [ia for ia, a in enumerate(aval) if a.size(1) < max_statelen]:
                     new_size = list(aval[ia].size())
                     new_size[1] = max_statelen
                     aval[ia] = pad_tensor_to_target(aval[ia], new_size)
             #print(f'{aname=} {[x.shape for x in aval]=}')
             setattr(self, aname, torch.cat(aval).contiguous())
+        encoder_out = pp.model.speecht5.encoder(
+            input_values=self.inputs,
+            attention_mask=self.encoder_attention_mask,
+            return_dict=True,
+        )
+        self.encoder_last_hidden_state = encoder_out.last_hidden_state
+        self.maxlen = int(self.encoder_last_hidden_state.size(1) * pp.maxlenratio / pp.model.config.reduction_factor)
+        self.minlen = int(self.encoder_last_hidden_state.size(1) * pp.minlenratio / pp.model.config.reduction_factor)
+
+        # Start the output sequence with a mel spectrum that is all zeros.
+        self.output_sequence = self.encoder_last_hidden_state.new_zeros(self.inputs.size(0), 1, pp.model.config.num_mel_bins)
         #if self.past_key_values is not None:
         #        batch_size = self.speaker_embeddings.size(0)
         #        past_key_values = [list(x) for x in self.past_key_values]
@@ -228,26 +230,28 @@ class HelloSippyRTPipe:
         with self.cuda_lock:
             self.processor = SpeechT5Processor.from_pretrained("microsoft/speecht5_tts")
             mc = SpeechT5Config(max_speech_positions=4000, **kwa)
-            model = SpeechT5ForTextToSpeech.from_pretrained("microsoft/speecht5_tts",
-                                                            config=mc).to(device)
+            model = maybe_half(SpeechT5ForTextToSpeech.from_pretrained("microsoft/speecht5_tts",
+                                                            config=mc)).to(device)
+            model.speecht5.decoder = maybe_half(model.speecht5.decoder)
+            model.speecht5.encoder = maybe_half(model.speecht5.encoder)
             model.eval()
             self.model = model
             _vc_conf = SpeechT5HifiGanConfig()
-            vocoder = SpeechT5HifiGan.from_pretrained("microsoft/speecht5_hifigan",
-                                                    config = _vc_conf).to(device)
+            vocoder = maybe_half(SpeechT5HifiGan.from_pretrained("microsoft/speecht5_hifigan",
+                                                    config = _vc_conf)).to(device)
             vocoder.eval()
             self.vocoder = vocoder
             self.c_conf = AmendmentNetwork1Config()
             chunker = AmendmentNetwork1.from_pretrained("sobomax/speecht5-rt.post_vocoder.v2",
                                                         config=self.c_conf)
-            chunker = chunker.to(device)
+            chunker = maybe_half(chunker).to(device)
             chunker.eval()
             self.chunker = chunker
             embeddings_dataset = load_dataset("Matthijs/cmu-arctic-xvectors", split="validation")
             self.speaker_embeddings = [torch.tensor(ed["xvector"], device='cpu').unsqueeze(0)
                                         for ed in sorted(embeddings_dataset, key=lambda x: x['filename'])]
             for x in [_x for x in (self.model.parameters, self.vocoder.parameters, self.chunker.parameters) for _x in x()] + self.speaker_embeddings: x.requires_grad = False
-            self.resampler = T.Resample(orig_freq=self.model_sr, new_freq=self.dispatch_sr).to(device)
+            self.resampler = maybe_half(T.Resample(orig_freq=self.model_sr, new_freq=self.dispatch_sr)).to(device)
 
     def alloc_session(self, speaker:Optional[torch.Tensor]=None) -> Tuple[InfernSession, HelloSippyPipeState]:
         assert threading.get_ident() == self._main_thread_id
@@ -285,7 +289,7 @@ class HelloSippyRTPipe:
         with self.cuda_lock:
             new_states = [HelloSippyPipeState(self, r) for r in reqs_live]
             #if state: state.mergein(new_states)
-            ws.state = HelloSippyPipeStateBatched(new_states, self.model.device)
+            ws.state = HelloSippyPipeStateBatched(new_states, self)
         #raise Exception(f'{len(ssq)=} {reqs_live=} {live=} {len(self.sessions)=}')
         self.main_gen(ws)
 
@@ -294,7 +298,7 @@ class HelloSippyRTPipe:
         state = ws.state
         with self.cuda_lock:
             batch_size = state.output_sequence.size(0)
-            spectrogram = torch.zeros(batch_size, 0, self.model.config.num_mel_bins, device=self.model.device)
+            spectrogram = maybe_half(torch.zeros(batch_size, 0, self.model.config.num_mel_bins)).to(self.model.device)
             while spectrogram.size(1) < (self.chunk_size * 4):
                 decoder_hidden_states = self.model.speecht5.decoder.prenet(state.output_sequence, state.speaker_embeddings)[:, -1:]
                 decoder_out = self.model.speecht5.decoder.wrapped_decoder(
@@ -440,6 +444,8 @@ def main():
         res = res_queue.get()
         rtr = (res.time_to_last_frame - res.time_to_first_frame) / (res.number_of_frames / 8000)
         print(f'Sess#{res.n}: {res.time_to_first_frame=}, {res.time_to_last_frame=}, {res.number_of_frames=} {rtr=}')
+        sys.stdout.flush()
+        s2[res.n][1].join()
     return(0)
 
     def init_states(states):
