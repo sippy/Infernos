@@ -1,6 +1,6 @@
 from queue import Queue, Empty as QueueEmpty
 
-from rtpsynth.RtpJBuf import RtpJBuf, RTPFrameType, RTPParseError
+from rtpsynth.RtpJBuf import RtpJBuf, RTPParseError
 
 from .InfernWrkThread import InfernWrkThread, RTPWrkTRun
 
@@ -37,7 +37,8 @@ class InfernRTPIngest(InfernWrkThread):
                 print(f"InfernRTPIngest.run: address={address}, rtime={rtime}, len(data) = {len(data)} data={data[:40]}")
             if npkts < 10 and len(res) > 0:
                 print(f"InfernRTPIngest.run: res = {res}")
-        print(f"InfernRTPIngest.run: last packet: address={address}, rtime={rtime}, len(data) = {len(data)} data={data[:40]}")
+        if data is not None:
+            print(f"InfernRTPIngest.run: last packet: address={address}, rtime={rtime}, len(data) = {len(data)} data={data[:40]}")
         print(f"InfernRTPIngest.run: exiting, total packets received: {npkts}")
 
     def stop(self):
