@@ -31,8 +31,8 @@ from sippy.SipConf import SipConf
 from sippy.SdpMedia import MTAudio
 from sippy.SipReason import SipReason
 
-from .InfernRTPGen import InfernRTPGen
 from Cluster.RemoteRTPGen import RTPGenError
+from Cluster.RemoteTTSSession import RemoteTTSSession, TTSSessionError
 
 from utils.tts import human_readable_time, hal_set, smith_set, \
         bender_set
@@ -80,10 +80,10 @@ class InfernUASFailure(CCEventFail):
                                 reason=reason)
 
 class InfernTTSUAS(UA):
-    _rgen: InfernRTPGen = None
+    _tsess: RemoteTTSSession = None
 
-    def __init__(self, sippy_c, tts, req, sip_t):
-        self._rgen = InfernRTPGen(tts, self.sess_term)
+    def __init__(self, sippy_c, tts_actr, req, sip_t):
+        self._tsess = RemoteTTSSession(tts_actr)
         super().__init__(sippy_c, self.outEvent)
         assert sip_t.noack_cb is None
         sip_t.noack_cb = self.sess_term
@@ -113,7 +113,7 @@ class InfernTTSUAS(UA):
         body = model_body.getCopy()
         sect = body.content.sections[0]
         try:
-            rtp_laddress = self._rgen.start(self.getPrompts(), rtp_target)
+            rtp_laddress = self._tsess.start(self.getPrompts(), rtp_target)
         except RTPGenError as e:
             event = InfernUASFailure(code=500, reason=str(e))
             self.recvEvent(event)
@@ -126,9 +126,9 @@ class InfernTTSUAS(UA):
 
     def sess_term(self, ua=None, rtime=None, origin=None, result=0):
         print('disconnected')
-        if self._rgen is None:
+        if self._tsess is None:
             return
-        self._rgen.stop()
-        self._rgen = None
+        self._tsess.end()
+        self._tsess = None
         if ua != self:
             self.disconnect()

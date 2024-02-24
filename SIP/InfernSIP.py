@@ -32,7 +32,7 @@ from sippy.Core.EventDispatcher import ED2
 from sippy.misc import local4remote
 #from sippy.Core.EventDispatcher import ED2
 
-from TTS import TTS
+from Cluster.InfernTTSActor import InfernTTSActor
 
 from .InfernUAS import InfernTTSUAS
 
@@ -49,7 +49,7 @@ class InfernSIP(object):
     ua = None
     body = None
     ragent = None
-    tts = None
+    tts_actr = None
     sippy_c = None
 
     def __init__(self, iao):
@@ -57,7 +57,7 @@ class InfernSIP(object):
                         '_sip_address':iao.laddr,
                         '_sip_port':iao.lport,
                         '_sip_logger':iao.logger}
-        self.tts = TTS()
+        self.tts_actr = InfernTTSActor.remote()
         self._o = iao
         udsc, udsoc = SipTransactionManager.model_udp_server
         udsoc.nworkers = 1
@@ -83,7 +83,7 @@ class InfernSIP(object):
             #if self.rserv != None:
             #    return (req.genResponse(486, 'Busy Here'), None, None)
             # New dialog
-            isess = InfernTTSUAS(self.sippy_c, self.tts, req, sip_t)
+            isess = InfernTTSUAS(self.sippy_c, self.tts_actr, req, sip_t)
             return
         return (req.genResponse(501, 'Not Implemented'), None, None)
 

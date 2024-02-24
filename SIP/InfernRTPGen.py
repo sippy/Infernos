@@ -24,6 +24,7 @@
 # SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 from time import monotonic
+from uuid import uuid4, UUID
 
 from sippy.Core.EventDispatcher import ED2
 
@@ -32,12 +33,14 @@ from Cluster.RemoteRTPGen import RemoteRTPGen
 from .InfernWrkThread import InfernWrkThread, RTPWrkTStop
 
 class InfernRTPGen(InfernWrkThread):
+    id: UUID
     tts = None
     ptime = 0.030
     worker: RemoteRTPGen
 
     def __init__(self, tts, sess_term):
         super().__init__()
+        self.id = uuid4()
         self.tts = tts
         self.sess_term = sess_term
         self.setDaemon(True)
@@ -46,6 +49,7 @@ class InfernRTPGen(InfernWrkThread):
         self.state_lock.acquire()
         self.worker = RemoteRTPGen(self.tts.rtp_actr, target)
         self.text = text
+        self.speaker = self.tts.get_rand_voice()
         self.state_lock.release()
         super().start()
         return self.worker.rtp_address
@@ -59,7 +63,6 @@ class InfernRTPGen(InfernWrkThread):
         from time import sleep
         for i, p in enumerate(text):
             sents = p.split('|')
-            speaker = self.tts.get_rand_voice()
             for si, p in enumerate(sents):
                 if self.get_state() == RTPWrkTStop:
                     break
@@ -68,7 +71,7 @@ class InfernRTPGen(InfernWrkThread):
                 #    sleep(0.5)
                 #    #print('sleept')
                 print(f'{monotonic():4.3f}: Playing', p)
-                self.tts.tts_rt(p, self.worker.soundout, speaker)
+                self.tts.tts_rt(p, self.worker.soundout, self.speaker)
                 self.worker.soundout(TTSSMarkerNewSent())
                 ##while self.get_state() != RTPWrkTStop and \
                 ##        self.worker.data_queue.qsize() > 3:
@@ -93,6 +96,6 @@ class InfernRTPGen(InfernWrkThread):
 
         self.worker.soundout(TTSSMarkerEnd())
         self.worker.join()
-        ED2.callFromThread(self.sess_term)
+        #ED2.callFromThread(self.sess_term)
         del self.sess_term
         del self.worker
