@@ -31,7 +31,7 @@ from sippy.SipConf import SipConf
 from sippy.SdpMedia import MTAudio
 from sippy.SipReason import SipReason
 
-from .InfernRTPGen import InfernRTPGen
+from .InfernRTPGen import InfernRTPGen, RTPGenError
 
 from utils.tts import human_readable_time, hal_set, smith_set, t900_set, \
         bender_set
@@ -69,9 +69,11 @@ prompts = ['Welcome to Infernos.'] + bender_set(2) + \
         smith_set() + hal_set() #+ t900_set() 
 
 class InfernUASFailure(CCEventFail):
-    code = 488
-    msg = 'Not Acceptable Here'
-    def __init__(self, reason):
+    default_code = 488
+    _code_msg = {default_code : 'Not Acceptable Here',
+                 500          : 'Server Internal Error'}
+    def __init__(self, reason=None, code=default_code):
+        self.code, self.msg = code, self._code_msg[code]
         super().__init__((self.code, self.msg))
         self.reason = SipReason(protocol='SIP', cause=self.code,
                                 reason=reason)
@@ -109,7 +111,12 @@ class InfernTTSUAS(UA):
         rtp_target = (sect.c_header.addr, sect.m_header.port)
         body = model_body.getCopy()
         sect = body.content.sections[0]
-        rtp_laddress = self._rgen.start(self.getPrompts(), rtp_target)
+        try:
+            rtp_laddress = self._rgen.start(self.getPrompts(), rtp_target)
+        except RTPGenError as e:
+            event = InfernUASFailure(code=500, reason=str(e))
+            self.recvEvent(event)
+            raise e
         sect.c_header.addr, sect.m_header.port = rtp_laddress
         body.content.o_header = SdpOrigin()
         oevent = CCEventConnect((200, 'OK', body))

@@ -26,6 +26,7 @@
 from time import monotonic
 
 import ray
+from ray.exceptions import RayTaskError
 
 from sippy.Core.EventDispatcher import ED2
 
@@ -46,6 +47,9 @@ class RemoteRTPGen():
     def join(self):
         return ray.get(self.sstor.join_rtp_session.remote(self.sess_id))
 
+class RTPGenError(Exception):
+    pass
+
 class InfernRTPGen(InfernWrkThread):
     tts = None
     ptime = 0.030
@@ -61,7 +65,10 @@ class InfernRTPGen(InfernWrkThread):
 
     def start(self, text, target):
         self.state_lock.acquire()
-        rtp_sess_id, rtp_laddress = ray.get(self.tts.sstor.new_rtp_session.remote(target))
+        try:
+            rtp_sess_id, rtp_laddress = ray.get(self.tts.sstor.new_rtp_session.remote(target))
+        except RayTaskError as e:
+            raise RTPGenError("new_rtp_session() failed") from e
         self.worker = RemoteRTPGen(self.tts.sstor, rtp_sess_id)
         self.text = text
         self.state_lock.release()
