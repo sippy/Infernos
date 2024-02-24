@@ -60,11 +60,12 @@ class InfernRTPActor():
         rep.writer.end()
 
     def soundout_rtp_session(self, rtp_id, chunk):
-        if self.firstframe:
+        ismark = isinstance(chunk, TTSSMarkerGeneric)
+        if self.firstframe or ismark:
             print(f'{self.stdtss()}: soundout_rtp_session')
             self.firstframe = False
         rep = self.sessions[rtp_id]
-        if not isinstance(chunk, TTSSMarkerGeneric):
+        if not ismark:
             chunk = chunk.to(rep.writer.device)
         return rep.writer.soundout(chunk)
 
