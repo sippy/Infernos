@@ -23,7 +23,10 @@ class InfernRTPEPoint():
         rserv_opts = Udp_server_opts((rtp_laddr, 0), self.ring.rtp_received)
         rserv_opts.nworkers = 1
         self.rserv = Udp_server({}, rserv_opts)
-        self.writer = TTSRTPOutput(0, 'xpu' if ipex is not None else 'cuda')
+        for dev in ('xpu' if ipex is not None else 'cuda', 'cpu'):
+            try: self.writer = TTSRTPOutput(0, dev)
+            except RuntimeError: continue
+            break
         self.writer.set_pkt_send_f(self.send_pkt)
         if self.dl_file is not None:
             self.writer.enable_datalog(self.dl_file)
