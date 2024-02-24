@@ -1,8 +1,9 @@
 from getopt import getopt, GetoptError
 import os, sys
 
+import ray
+
 from sippy.misc import daemonize
-from sippy.Core.EventDispatcher import ED2
 from sippy.SipLogger import SipLogger
 
 sys.path.append('.')
@@ -80,6 +81,8 @@ if __name__ == '__main__':
     else:
         lfile = open(logfile, 'a')
 
+    ray.init()
+
     if pidfile != None:
         open(pidfile, 'w').write('%d' % os.getpid())
 
@@ -89,11 +92,5 @@ if __name__ == '__main__':
     iuac.authpass = authpass
     iuac.cli = iuac.cld = authname
     iua = InfernSIP(iuac)
-    #pio = PELIO(lfile)
-    #if sdev != None:
-    #    pio.sdev = sdev
-    #pio.sstart_cb = pua.sess_started
-    #pio.send_cb = pua.sess_ended
-    #pio.start()
-    exit(ED2.loop())
+    exit(iua.loop())
 

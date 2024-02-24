@@ -27,6 +27,7 @@ from sippy.SipConf import SipConf
 from sippy.SipTransactionManager import SipTransactionManager
 from sippy.SipURL import SipURL
 from sippy.SipRegistrationAgent import SipRegistrationAgent
+from sippy.Core.EventDispatcher import ED2
 
 from sippy.misc import local4remote
 #from sippy.Core.EventDispatcher import ED2
@@ -85,3 +86,6 @@ class InfernSIP(object):
             isess = InfernTTSUAS(self.sippy_c, self.tts, req, sip_t)
             return
         return (req.genResponse(501, 'Not Implemented'), None, None)
+
+    def loop(self):
+        return ED2.loop()

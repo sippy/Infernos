@@ -23,11 +23,28 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 # SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+from time import monotonic
+
+import ray
+
 from sippy.Core.EventDispatcher import ED2
 
-import sys
-from TTS import TTSSMarkerEnd, TTSSMarkerNewSent
-from .InfernWrkThread import InfernWrkThread, RTPWrkTInit, RTPWrkTRun, RTPWrkTStop
+from TTSRTPOutput import TTSSMarkerEnd, TTSSMarkerNewSent
+from .InfernWrkThread import InfernWrkThread, RTPWrkTStop
+
+class RemoteRTPGen():
+    def __init__(self, sstor, sess_id):
+        self.sstor = sstor
+        self.sess_id = sess_id
+
+    def soundout(self, chunk):
+        return ray.get(self.sstor.soundout_rtp_session.remote(self.sess_id, chunk))
+
+    def end(self):
+        return ray.get(self.sstor.end_rtp_session.remote(self.sess_id))
+
+    def join(self):
+        return ray.get(self.sstor.join_rtp_session.remote(self.sess_id))
 
 class InfernRTPGen(InfernWrkThread):
     tts = None
@@ -35,7 +52,6 @@ class InfernRTPGen(InfernWrkThread):
     userv = None
     target = None
     worker = None
-    dl_file = None
 
     def __init__(self, tts, sess_term):
         super().__init__()
@@ -43,22 +59,14 @@ class InfernRTPGen(InfernWrkThread):
         self.sess_term = sess_term
         self.setDaemon(True)
 
-    def start(self, text, userv, target):
+    def start(self, text, target):
         self.state_lock.acquire()
-        self.target = target
-        self.userv = userv
-        wrkr = self.tts.get_pkt_proc()
-        wrkr.set_pkt_send_f(self.send_pkt)
-        if self.dl_file is not None:
-            wrkr.enable_datalog(self.dl_file)
-        wrkr.start()
-        self.worker = wrkr
+        rtp_sess_id, rtp_laddress = ray.get(self.tts.sstor.new_rtp_session.remote(target))
+        self.worker = RemoteRTPGen(self.tts.sstor, rtp_sess_id)
         self.text = text
         self.state_lock.release()
         super().start()
-
-    def send_pkt(self, pkt):
-        self.userv.send_to(pkt, self.target)
+        return rtp_laddress
 
     def run(self):
         super().thread_started()
@@ -77,28 +85,29 @@ class InfernRTPGen(InfernWrkThread):
                 #    from time import sleep
                 #    sleep(0.5)
                 #    #print('sleept')
-                print('Playing', p)
-                self.tts.tts_rt(p, self.worker.soundout,
-                                speaker)
+                print(f'{monotonic():4.3f}: Playing', p)
+                self.tts.tts_rt(p, self.worker.soundout, speaker)
                 self.worker.soundout(TTSSMarkerNewSent())
-                while self.get_state() != RTPWrkTStop and \
-                        self.worker.data_queue.qsize() > 3:
-                    sleep(0.3)
-                print(f'get_frm_ctrs={self.worker.get_frm_ctrs()}')
-                print(f'data_queue.qsize()={self.worker.data_queue.qsize()}')
-        while True:
-            if self.get_state() == RTPWrkTStop:
-                self.worker.end()
-                break
-            if self.worker.data_queue.qsize() > 0:
-                sleep(0.1)
-                continue
-            cntrs = self.worker.get_frm_ctrs()
-            if cntrs[0] < cntrs[1]:
-                print(f'{cntrs[0]} < {cntrs[1]}')
-                sleep(0.01)
-                continue
-            break
+                ##while self.get_state() != RTPWrkTStop and \
+                ##        self.worker.data_queue.qsize() > 3:
+                ##    sleep(0.3)
+                ##print(f'get_frm_ctrs={self.worker.get_frm_ctrs()}')
+                ##print(f'data_queue.qsize()={self.worker.data_queue.qsize()}')
+        ##while True:
+        ##    if self.get_state() == RTPWrkTStop:
+        ##        self.worker.end()
+        ##        break
+        ##    if self.worker.data_queue.qsize() > 0:
+        ##        sleep(0.1)
+        ##        continue
+        ##    cntrs = self.worker.get_frm_ctrs()
+        ##    if cntrs[0] < cntrs[1]:
+        ##        print(f'{cntrs[0]} < {cntrs[1]}')
+        ##        sleep(0.01)
+        ##        continue
+        ##    break
+        if self.get_state() == RTPWrkTStop:
+            self.worker.end()
 
         self.worker.soundout(TTSSMarkerEnd())
         self.worker.join()
