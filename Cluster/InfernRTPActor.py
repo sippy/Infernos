@@ -41,6 +41,7 @@ class InfernRTPEPoint():
 @ray.remote(resources={"rtp": 1})
 class InfernRTPActor():
     sessions: dict
+    firstframe = True
     def __init__(self):
         self.sessions = {}
 
@@ -59,7 +60,9 @@ class InfernRTPActor():
         rep.writer.end()
 
     def soundout_rtp_session(self, rtp_id, chunk):
-        print(f'{self.stdtss()}: soundout_rtp_session')
+        if self.firstframe:
+            print(f'{self.stdtss()}: soundout_rtp_session')
+            self.firstframe = False
         rep = self.sessions[rtp_id]
         if not isinstance(chunk, TTSSMarkerGeneric):
             chunk = chunk.to(rep.writer.device)
