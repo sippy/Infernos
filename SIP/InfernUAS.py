@@ -23,21 +23,20 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 # SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+from uuid import uuid4, UUID
+
 from sippy.UA import UA
 from sippy.CCEvents import CCEventTry, CCEventConnect, CCEventFail
 from sippy.MsgBody import MsgBody
 from sippy.SdpOrigin import SdpOrigin
-from sippy.Udp_server import Udp_server, Udp_server_opts
 from sippy.SipConf import SipConf
 from sippy.SdpMedia import MTAudio
 from sippy.SipReason import SipReason
 
-from sippy.misc import local4remote
+from Cluster.RemoteRTPGen import RTPGenError
+from Cluster.RemoteTTSSession import RemoteTTSSession, TTSSessionError
 
-from .InfernRTPGen import InfernRTPGen
-from .InfernRTPIngest import InfernRTPIngest
-
-from utils.tts import human_readable_time, hal_set, smith_set, t900_set, \
+from utils.tts import human_readable_time, hal_set, smith_set, \
         bender_set
 
 ULAW_PT = 0
@@ -73,23 +72,23 @@ prompts = ['Welcome to Infernos.'] + bender_set(2) + \
         smith_set() + hal_set() #+ t900_set() 
 
 class InfernUASFailure(CCEventFail):
-    code = 488
-    msg = 'Not Acceptable Here'
-    def __init__(self, reason):
+    default_code = 488
+    _code_msg = {default_code : 'Not Acceptable Here',
+                 500          : 'Server Internal Error'}
+    def __init__(self, reason=None, code=default_code):
+        self.code, self.msg = code, self._code_msg[code]
         super().__init__((self.code, self.msg))
         self.reason = SipReason(protocol='SIP', cause=self.code,
                                 reason=reason)
 
 class InfernTTSUAS(UA):
-    _rserv = None
-    _rgen: InfernRTPGen = None
-    _ring: InfernRTPIngest = None
-    #_rtp_target = None
+    debug = True
+    id: UUID
+    _tsess: RemoteTTSSession = None
 
-    def __init__(self, sippy_c, tts, req, sip_t):
-        self._rgen = InfernRTPGen(tts, self.sess_term)
-        self._ring = InfernRTPIngest()
-        #self._rgen.dl_file = 'Infernos.check.wav'
+    def __init__(self, sippy_c, tts_actr, req, sip_t):
+        self.id = uuid4()
+        self._tsess = RemoteTTSSession(tts_actr, self.id)
         super().__init__(sippy_c, self.outEvent)
         assert sip_t.noack_cb is None
         sip_t.noack_cb = self.sess_term
@@ -102,9 +101,6 @@ class InfernTTSUAS(UA):
         if not isinstance(event, CCEventTry):
             #ua.disconnect()
             return
-        #if isinstance(event, CCEventConnect):
-        #    #self._rgen.start(prompts, self._rserv, self._rtp_target)
-        #    return
         cId, cli, cld, sdp_body, auth, caller_name = event.getData()
         if sdp_body == None:
             ua.disconnect()
@@ -119,32 +115,29 @@ class InfernTTSUAS(UA):
             return
         sect = sects[0]
         rtp_target = (sect.c_header.addr, sect.m_header.port)
-        rtp_laddr = local4remote(rtp_target[0])
-        #self._rtp_target = rtp_target
-        rserv_opts = Udp_server_opts((rtp_laddr, 0), self._ring.rtp_received)
-        rserv_opts.nworkers = 1
-        self._rserv = Udp_server({}, rserv_opts)
-        #isess = InfernSession(rtp_laddr, self.tts)
-        #    isess.uaA = ua
         body = model_body.getCopy()
         sect = body.content.sections[0]
-        sect.c_header.addr = self._rserv.uopts.laddress[0]
-        sect.m_header.port = self._rserv.uopts.laddress[1]
+        try:
+            rtp_laddress = self._tsess.start(self.getPrompts(), rtp_target)
+        except RTPGenError as e:
+            event = InfernUASFailure(code=500, reason=str(e))
+            self.recvEvent(event)
+            raise e
+        sect.c_header.addr, sect.m_header.port = rtp_laddress
         body.content.o_header = SdpOrigin()
         oevent = CCEventConnect((200, 'OK', body))
         self.disc_cbs = (self.sess_term,)
-        self._rgen.start(self.getPrompts(), self._rserv, rtp_target)
-        self._ring.start()
         return self.recvEvent(oevent)
 
     def sess_term(self, ua=None, rtime=None, origin=None, result=0):
         print('disconnected')
-        if self._rgen is None:
+        if self._tsess is None:
             return
-        self._ring.stop()
-        self._rgen.stop()
-        self._rserv.shutdown()
-        self._rserv = None
-        self._rgen = None
+        self._tsess.end()
+        self._tsess = None
         if ua != self:
             self.disconnect()
+
+    def __del__(self):
+        if self.debug:
+            print('InfernUAS.__del__')

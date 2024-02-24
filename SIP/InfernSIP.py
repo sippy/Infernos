@@ -23,15 +23,13 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 # SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+from weakref import WeakValueDictionary
+
 from sippy.SipConf import SipConf
 from sippy.SipTransactionManager import SipTransactionManager
 from sippy.SipURL import SipURL
 from sippy.SipRegistrationAgent import SipRegistrationAgent
-
 from sippy.misc import local4remote
-#from sippy.Core.EventDispatcher import ED2
-
-from TTS import TTS
 
 from .InfernUAS import InfernTTSUAS
 
@@ -48,15 +46,17 @@ class InfernSIP(object):
     ua = None
     body = None
     ragent = None
-    tts = None
+    tts_actr = None
     sippy_c = None
+    sessions: WeakValueDictionary
 
-    def __init__(self, iao):
+    def __init__(self, tts_actr, iao):
         self.sippy_c = {'nh_addr':tuple(iao.nh_addr),
                         '_sip_address':iao.laddr,
                         '_sip_port':iao.lport,
                         '_sip_logger':iao.logger}
-        self.tts = TTS()
+        self.tts_actr = tts_actr
+        self.sessions = WeakValueDictionary()
         self._o = iao
         udsc, udsoc = SipTransactionManager.model_udp_server
         udsoc.nworkers = 1
@@ -82,6 +82,10 @@ class InfernSIP(object):
             #if self.rserv != None:
             #    return (req.genResponse(486, 'Busy Here'), None, None)
             # New dialog
-            isess = InfernTTSUAS(self.sippy_c, self.tts, req, sip_t)
+            isess = InfernTTSUAS(self.sippy_c, self.tts_actr, req, sip_t)
+            self.sessions[isess.id] = isess
             return
         return (req.genResponse(501, 'Not Implemented'), None, None)
+
+    def get_session(self, sip_sess_id):
+        return self.sessions[sip_sess_id]

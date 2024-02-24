@@ -1,10 +1,11 @@
 from queue import Queue, Empty as QueueEmpty
 
-from rtpsynth.RtpJBuf import RtpJBuf, RTPFrameType, RTPParseError
+from rtpsynth.RtpJBuf import RtpJBuf, RTPParseError
 
-from .InfernWrkThread import InfernWrkThread, RTPWrkTRun
+from Core.InfernWrkThread import InfernWrkThread, RTPWrkTRun
 
 class InfernRTPIngest(InfernWrkThread):
+    debug = True
     pkt_queue: Queue = None
     jb_size: int = 8
     input_sr: int = 8000
@@ -16,9 +17,13 @@ class InfernRTPIngest(InfernWrkThread):
         self.output_sr = output_sr
 #        self.start()
 
+    def dprint(self, *args):
+        if self.debug:
+            print(*args)
+
     def run(self):
         super().thread_started()
-        print("InfernRTPIngest started")
+        self.dprint("InfernRTPIngest started")
         data, address, rtime = (None, None, None)
         npkts = 0
         jbuf = RtpJBuf(self.jb_size)
@@ -30,20 +35,24 @@ class InfernRTPIngest(InfernWrkThread):
             try:
                 res = jbuf.udp_in(data)
             except RTPParseError as e:
-                print(f"InfernRTPIngest.run: RTPParseError: {e}")
+                self.dprint(f"InfernRTPIngest.run: RTPParseError: {e}")
                 continue
             npkts += 1
             if npkts == 1:
-                print(f"InfernRTPIngest.run: address={address}, rtime={rtime}, len(data) = {len(data)} data={data[:40]}")
+                self.dprint(f"InfernRTPIngest.run: address={address}, rtime={rtime}, len(data) = {len(data)} data={data[:40]}")
             if npkts < 10 and len(res) > 0:
-                print(f"InfernRTPIngest.run: res = {res}")
-        print(f"InfernRTPIngest.run: last packet: address={address}, rtime={rtime}, len(data) = {len(data)} data={data[:40]}")
-        print(f"InfernRTPIngest.run: exiting, total packets received: {npkts}")
+                self.dprint(f"InfernRTPIngest.run: res = {res}")
+        if data is not None:
+            self.dprint(f"InfernRTPIngest.run: last packet: address={address}, rtime={rtime}, len(data) = {len(data)} data={data[:40]}")
+        self.dprint(f"InfernRTPIngest.run: exiting, total packets received: {npkts}")
 
     def stop(self):
         super().stop()
-        print("InfernRTPIngest stopped")
+        self.dprint("InfernRTPIngest stopped")
 
     def rtp_received(self, data, address, udp_server, rtime):
-        #print(f"InfernRTPIngest.rtp_received: len(data) = {len(data)}")
+        #self.dprint(f"InfernRTPIngest.rtp_received: len(data) = {len(data)}")
         self.pkt_queue.put((data, address, rtime))
+
+    def __del__(self):
+        self.dprint("InfernRTPIngest.__del__")
