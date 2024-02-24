@@ -9,7 +9,7 @@ from sippy.SipLogger import SipLogger
 sys.path.append('.')
 
 from SIP.InfernUAS import InfernUASConf
-from SIP.InfernSIP import InfernSIP
+from Cluster.InfernSIPActor import InfernSIPActor
 
 def patch_signals():
     import threading
@@ -91,6 +91,9 @@ if __name__ == '__main__':
     iuac.authname = authname
     iuac.authpass = authpass
     iuac.cli = iuac.cld = authname
-    iua = InfernSIP(iuac)
-    exit(iua.loop())
-
+    iua = InfernSIPActor.options(max_concurrency=2).remote(iuac)
+    try:
+        exit(ray.get(iua.loop.remote()))
+    except KeyboardInterrupt:
+        ray.get(iua.stop.remote())
+        raise
