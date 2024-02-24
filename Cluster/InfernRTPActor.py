@@ -1,3 +1,6 @@
+try: import intel_extension_for_pytorch as ipex
+except ModuleNotFoundError: ipex = None
+
 from uuid import uuid4, UUID
 from time import monotonic
 
@@ -20,7 +23,7 @@ class InfernRTPEPoint():
         rserv_opts = Udp_server_opts((rtp_laddr, 0), self.ring.rtp_received)
         rserv_opts.nworkers = 1
         self.rserv = Udp_server({}, rserv_opts)
-        self.writer = TTSRTPOutput(0, 'xpu')
+        self.writer = TTSRTPOutput(0, 'xpu' if ipex is not None else 'cuda')
         self.writer.set_pkt_send_f(self.send_pkt)
         if self.dl_file is not None:
             self.writer.enable_datalog(self.dl_file)
@@ -30,7 +33,7 @@ class InfernRTPEPoint():
     def send_pkt(self, pkt):
         self.rserv.send_to(pkt, self.rtp_target)
 
-@ray.remote
+@ray.remote(resources={"rtp": 1})
 class InfernRTPActor():
     sessions: dict
     def __init__(self):
