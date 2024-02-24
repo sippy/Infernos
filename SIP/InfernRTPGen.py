@@ -30,7 +30,7 @@ from ray.exceptions import RayTaskError
 
 from sippy.Core.EventDispatcher import ED2
 
-from TTSRTPOutput import TTSSMarkerEnd, TTSSMarkerNewSent
+from TTSRTPOutput import TTSSMarkerGeneric, TTSSMarkerEnd, TTSSMarkerNewSent
 from .InfernWrkThread import InfernWrkThread, RTPWrkTStop
 
 class RemoteRTPGen():
@@ -39,6 +39,8 @@ class RemoteRTPGen():
         self.sess_id = sess_id
 
     def soundout(self, chunk):
+        if not isinstance(chunk, TTSSMarkerGeneric):
+            chunk = chunk.to('cpu')
         return ray.get(self.sstor.soundout_rtp_session.remote(self.sess_id, chunk))
 
     def end(self):
