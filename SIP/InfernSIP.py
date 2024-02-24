@@ -27,12 +27,7 @@ from sippy.SipConf import SipConf
 from sippy.SipTransactionManager import SipTransactionManager
 from sippy.SipURL import SipURL
 from sippy.SipRegistrationAgent import SipRegistrationAgent
-from sippy.Core.EventDispatcher import ED2
-
 from sippy.misc import local4remote
-#from sippy.Core.EventDispatcher import ED2
-
-from Cluster.InfernTTSActor import InfernTTSActor
 
 from .InfernUAS import InfernTTSUAS
 
@@ -52,12 +47,12 @@ class InfernSIP(object):
     tts_actr = None
     sippy_c = None
 
-    def __init__(self, iao):
+    def __init__(self, tts_actr, iao):
         self.sippy_c = {'nh_addr':tuple(iao.nh_addr),
                         '_sip_address':iao.laddr,
                         '_sip_port':iao.lport,
                         '_sip_logger':iao.logger}
-        self.tts_actr = InfernTTSActor.remote()
+        self.tts_actr = tts_actr
         self._o = iao
         udsc, udsoc = SipTransactionManager.model_udp_server
         udsoc.nworkers = 1
@@ -86,6 +81,3 @@ class InfernSIP(object):
             isess = InfernTTSUAS(self.sippy_c, self.tts_actr, req, sip_t)
             return
         return (req.genResponse(501, 'Not Implemented'), None, None)
-
-    def loop(self):
-        return ED2.loop()

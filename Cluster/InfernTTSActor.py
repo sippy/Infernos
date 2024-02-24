@@ -12,10 +12,11 @@ class InfernTTSActor():
     sessions: dict
     tts: TTS
 
-    def __init__(self):
+    def __init__(self, rtp_actr):
         super().__init__()
         self.sessions = {}
         self.tts = TTS()
+        self.rtp_actr = rtp_actr
 
     def new_tts_session(self):
         rgen = InfernRTPGen(self.tts, self.sess_term)
@@ -24,7 +25,7 @@ class InfernTTSActor():
 
     def start_tts_session(self, rgen_id, text, target):
         rgen = self.sessions[rgen_id]
-        rtp_address = rgen.start(text, target)
+        rtp_address = rgen.start(self.rtp_actr, text, target)
         return rtp_address
 
     def end_tts_session(self, rgen_id):

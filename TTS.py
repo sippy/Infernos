@@ -6,7 +6,6 @@ except ModuleNotFoundError:
 from HelloSippyTTSRT.HelloSippyRT import HelloSippyRT
 
 from TTSRTPOutput import TTSRTPOutput, TTSSMarkerEnd
-from Cluster.InfernRTPActor import InfernRTPActor
 
 class TTS(HelloSippyRT):
     device = 'cuda' if ipex is None else 'xpu'
@@ -19,7 +18,6 @@ class TTS(HelloSippyRT):
             self.vocoder = ipex.optimize(self.vocoder)
             self.chunker = ipex.optimize(self.chunker)
             #raise Exception(f"{type(hsrt.chunker)}")
-        self.rtp_actr = InfernRTPActor.remote()
 
     def dotts(self, text, ofname):
         if False:

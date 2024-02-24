@@ -45,9 +45,9 @@ class InfernRTPGen(InfernWrkThread):
         self.sess_term = sess_term
         self.setDaemon(True)
 
-    def start(self, text, target):
+    def start(self, rtp_actr, text, target):
         self.state_lock.acquire()
-        self.worker = RemoteRTPGen(self.tts.rtp_actr, target)
+        self.worker = RemoteRTPGen(rtp_actr, target)
         self.text = text
         self.speaker = self.tts.get_rand_voice()
         self.state_lock.release()

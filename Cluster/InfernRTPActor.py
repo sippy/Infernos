@@ -3,6 +3,7 @@ except ModuleNotFoundError: ipex = None
 
 from uuid import uuid4, UUID
 from time import monotonic
+from _thread import get_ident
 
 from ray import ray
 
@@ -77,3 +78,12 @@ class InfernRTPActor():
         rep.ring.join()
         rep.rserv.shutdown()
         del self.sessions[rtp_id]
+
+    def loop(self):
+        from sippy.Core.EventDispatcher import ED2
+        ED2.my_ident = get_ident()
+        return (ED2.loop())
+
+    def stop(self):
+        from sippy.Core.EventDispatcher import ED2
+        ED2.callFromThread(ED2.breakLoop, 0)
