@@ -31,9 +31,10 @@ from sippy.SipConf import SipConf
 from sippy.SdpMedia import MTAudio
 from sippy.SipReason import SipReason
 
-from .InfernRTPGen import InfernRTPGen, RTPGenError
+from .InfernRTPGen import InfernRTPGen
+from Cluster.RemoteRTPGen import RTPGenError
 
-from utils.tts import human_readable_time, hal_set, smith_set, t900_set, \
+from utils.tts import human_readable_time, hal_set, smith_set, \
         bender_set
 
 ULAW_PT = 0

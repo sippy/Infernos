@@ -19,7 +19,7 @@ class TTS(HelloSippyRT):
             self.vocoder = ipex.optimize(self.vocoder)
             self.chunker = ipex.optimize(self.chunker)
             #raise Exception(f"{type(hsrt.chunker)}")
-        self.sstor = InfernRTPActor.remote()
+        self.rtp_actr = InfernRTPActor.remote()
 
     def dotts(self, text, ofname):
         if False:

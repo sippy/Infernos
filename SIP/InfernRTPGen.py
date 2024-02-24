@@ -25,39 +25,16 @@
 
 from time import monotonic
 
-import ray
-from ray.exceptions import RayTaskError
-
 from sippy.Core.EventDispatcher import ED2
 
-from TTSRTPOutput import TTSSMarkerGeneric, TTSSMarkerEnd, TTSSMarkerNewSent
+from TTSRTPOutput import TTSSMarkerEnd, TTSSMarkerNewSent
+from Cluster.RemoteRTPGen import RemoteRTPGen
 from .InfernWrkThread import InfernWrkThread, RTPWrkTStop
-
-class RemoteRTPGen():
-    def __init__(self, sstor, sess_id):
-        self.sstor = sstor
-        self.sess_id = sess_id
-
-    def soundout(self, chunk):
-        if not isinstance(chunk, TTSSMarkerGeneric):
-            chunk = chunk.to('cpu')
-        return ray.get(self.sstor.soundout_rtp_session.remote(self.sess_id, chunk))
-
-    def end(self):
-        return ray.get(self.sstor.end_rtp_session.remote(self.sess_id))
-
-    def join(self):
-        return ray.get(self.sstor.join_rtp_session.remote(self.sess_id))
-
-class RTPGenError(Exception):
-    pass
 
 class InfernRTPGen(InfernWrkThread):
     tts = None
     ptime = 0.030
-    userv = None
-    target = None
-    worker = None
+    worker: RemoteRTPGen
 
     def __init__(self, tts, sess_term):
         super().__init__()
@@ -67,15 +44,11 @@ class InfernRTPGen(InfernWrkThread):
 
     def start(self, text, target):
         self.state_lock.acquire()
-        try:
-            rtp_sess_id, rtp_laddress = ray.get(self.tts.sstor.new_rtp_session.remote(target))
-        except RayTaskError as e:
-            raise RTPGenError("new_rtp_session() failed") from e
-        self.worker = RemoteRTPGen(self.tts.sstor, rtp_sess_id)
+        self.worker = RemoteRTPGen(self.tts.rtp_actr, target)
         self.text = text
         self.state_lock.release()
         super().start()
-        return rtp_laddress
+        return self.worker.rtp_address
 
     def run(self):
         super().thread_started()
@@ -123,7 +96,3 @@ class InfernRTPGen(InfernWrkThread):
         ED2.callFromThread(self.sess_term)
         del self.sess_term
         del self.worker
-
-    def stop(self):
-        super().stop()
-        self.userv = None
