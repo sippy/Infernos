@@ -52,7 +52,6 @@ class InfernRTPEPoint():
         if self.debug:
             print('InfernRTPEPoint.__del__')
 
-
     def soundout(self, chunk, stdtss):
         ismark = isinstance(chunk, TTSSMarkerGeneric)
         if self.firstframe or ismark:
@@ -64,7 +63,7 @@ class InfernRTPEPoint():
             chunk = chunk.to(self.writer.device)
         return self.writer.soundout(chunk)
 
-@ray.remote(resources={"_rtp": 1})
+@ray.remote(resources={"rtp": 1})
 class InfernRTPActor():
     sessions: dict
     def __init__(self):
