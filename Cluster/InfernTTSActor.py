@@ -18,6 +18,7 @@ class InfernTTSActor():
         self.tts = TTS()
         self.rtp_actr = rtp_actr
         self.sip_actr = sip_actr
+        self.tts_actr = ray.get_runtime_context().current_actor
 
     def new_tts_session(self, sip_sess_id):
         rgen = TTSSession(self.tts, lambda: self.sess_term(sip_sess_id))
@@ -26,8 +27,12 @@ class InfernTTSActor():
 
     def start_tts_session(self, rgen_id, text, target):
         rgen = self.sessions[rgen_id]
-        rtp_address = rgen.start(self.rtp_actr, text, target)
+        rtp_address = rgen.start(self.tts_actr, self.rtp_actr, text, target)
         return rtp_address
+
+    def tts_session_eos(self, rgen_id):
+        rgen = self.sessions[rgen_id]
+        rgen.eos()
 
     def end_tts_session(self, rgen_id):
         rgen = self.sessions[rgen_id]

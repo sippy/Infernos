@@ -25,10 +25,20 @@
 
 from time import monotonic
 from uuid import uuid4, UUID
+from queue import Queue
 
 from TTSRTPOutput import TTSSMarkerEnd, TTSSMarkerNewSent
 from Cluster.RemoteRTPGen import RemoteRTPGen
 from Core.InfernWrkThread import InfernWrkThread, RTPWrkTStop
+
+class TTSSMarkerNewSentCB(TTSSMarkerNewSent):
+    def __init__(self, tts_actr, tts_sess):
+        super().__init__()
+        self.tts_actr = tts_actr
+        self.tts_sess_id = tts_sess.id
+
+    def on_proc(self, tro_self):
+        self.tts_actr.tts_session_eos.remote(self.tts_sess_id)
 
 class TTSSession(InfernWrkThread):
     debug = True
@@ -36,6 +46,8 @@ class TTSSession(InfernWrkThread):
     tts = None
     ptime = 0.030
     worker: RemoteRTPGen
+    eos_m: TTSSMarkerNewSentCB
+    eos_q: Queue
 
     def __init__(self, tts, sess_term):
         super().__init__()
@@ -44,11 +56,13 @@ class TTSSession(InfernWrkThread):
         self.sess_term = sess_term
         self.setDaemon(True)
 
-    def start(self, rtp_actr, text, target):
+    def start(self, tts_actr, rtp_actr, text, target):
         self.state_lock.acquire()
         self.worker = RemoteRTPGen(rtp_actr, target)
         self.text = text
         self.speaker = self.tts.get_rand_voice()
+        self.eos_m = TTSSMarkerNewSentCB(tts_actr, self)
+        self.eos_q = Queue()
         self.state_lock.release()
         super().start()
         return self.worker.rtp_address
@@ -60,6 +74,7 @@ class TTSSession(InfernWrkThread):
         else:
             text = self.text
         from time import sleep
+        disconnected = False
         for i, p in enumerate(text):
             sents = p.split('|')
             for si, p in enumerate(sents):
@@ -71,12 +86,16 @@ class TTSSession(InfernWrkThread):
                 #    #print('sleept')
                 print(f'{monotonic():4.3f}: Playing', p)
                 self.tts.tts_rt(p, self.worker.soundout, self.speaker)
-                self.worker.soundout(TTSSMarkerNewSent())
+                self.worker.soundout(self.eos_m)
+                disconnected = not self.eos_q.get()
+                if disconnected: break
+                print(f'{monotonic():4.3f}: Done playing', p)
                 ##while self.get_state() != RTPWrkTStop and \
                 ##        self.worker.data_queue.qsize() > 3:
                 ##    sleep(0.3)
                 ##print(f'get_frm_ctrs={self.worker.get_frm_ctrs()}')
                 ##print(f'data_queue.qsize()={self.worker.data_queue.qsize()}')
+            if disconnected: break
         ##while True:
         ##    if self.get_state() == RTPWrkTStop:
         ##        self.worker.end()
@@ -98,6 +117,14 @@ class TTSSession(InfernWrkThread):
         self.sess_term()
         del self.sess_term
         del self.worker
+
+    def eos(self):
+        print(f'{monotonic():4.3f}: TTSSession.eos')
+        self.eos_q.put(True)
+
+    def stop(self):
+        self.eos_q.put(False)
+        super().stop()
 
     def __del__(self):
         if self.debug:

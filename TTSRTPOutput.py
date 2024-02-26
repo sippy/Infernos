@@ -14,7 +14,8 @@ class TTSSMarkerGeneric():
     pass
 
 class TTSSMarkerNewSent(TTSSMarkerGeneric):
-    pass
+    # This runs in the context of the TTSRTPOutput thread
+    def on_proc(self, tro_self, *args): pass
 
 class TTSSMarkerEnd(TTSSMarkerGeneric):
     pass
@@ -146,6 +147,7 @@ class TTSRTPOutput(threading.Thread):
                 itime = monotonic()
                 rsynth.resync()
                 rsynth.set_mbt(1)
+                chunk_n.on_proc(self)
                 continue
             self.update_frm_ctrs(rcvd_inc=chunk_n.size(0))
             ctime = monotonic()
