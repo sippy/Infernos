@@ -23,6 +23,8 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 # SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+from weakref import WeakValueDictionary
+
 from sippy.SipConf import SipConf
 from sippy.SipTransactionManager import SipTransactionManager
 from sippy.SipURL import SipURL
@@ -46,6 +48,7 @@ class InfernSIP(object):
     ragent = None
     tts_actr = None
     sippy_c = None
+    sessions: WeakValueDictionary
 
     def __init__(self, tts_actr, iao):
         self.sippy_c = {'nh_addr':tuple(iao.nh_addr),
@@ -53,6 +56,7 @@ class InfernSIP(object):
                         '_sip_port':iao.lport,
                         '_sip_logger':iao.logger}
         self.tts_actr = tts_actr
+        self.sessions = WeakValueDictionary()
         self._o = iao
         udsc, udsoc = SipTransactionManager.model_udp_server
         udsoc.nworkers = 1
@@ -79,5 +83,9 @@ class InfernSIP(object):
             #    return (req.genResponse(486, 'Busy Here'), None, None)
             # New dialog
             isess = InfernTTSUAS(self.sippy_c, self.tts_actr, req, sip_t)
+            self.sessions[isess.id] = isess
             return
         return (req.genResponse(501, 'Not Implemented'), None, None)
+
+    def get_session(self, sip_sess_id):
+        return self.sessions[sip_sess_id]
