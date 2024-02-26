@@ -2,7 +2,7 @@ from queue import Queue, Empty as QueueEmpty
 
 from rtpsynth.RtpJBuf import RtpJBuf, RTPParseError
 
-from .InfernWrkThread import InfernWrkThread, RTPWrkTRun
+from Core.InfernWrkThread import InfernWrkThread, RTPWrkTRun
 
 class InfernRTPIngest(InfernWrkThread):
     pkt_queue: Queue = None

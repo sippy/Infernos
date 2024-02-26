@@ -28,9 +28,9 @@ from uuid import uuid4, UUID
 
 from TTSRTPOutput import TTSSMarkerEnd, TTSSMarkerNewSent
 from Cluster.RemoteRTPGen import RemoteRTPGen
-from .InfernWrkThread import InfernWrkThread, RTPWrkTStop
+from Core.InfernWrkThread import InfernWrkThread, RTPWrkTStop
 
-class InfernRTPGen(InfernWrkThread):
+class TTSSession(InfernWrkThread):
     debug = True
     id: UUID
     tts = None
@@ -101,4 +101,4 @@ class InfernRTPGen(InfernWrkThread):
 
     def __del__(self):
         if self.debug:
-            print('InfernRTPGen.__del__')
+            print('TTSSession.__del__')

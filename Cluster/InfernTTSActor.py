@@ -3,7 +3,7 @@ except ModuleNotFoundError: ipex = None
 
 import ray
 
-from SIP.InfernRTPGen import InfernRTPGen
+from Cluster.TTSSession import TTSSession
 
 from TTS import TTS
 
@@ -20,7 +20,7 @@ class InfernTTSActor():
         self.sip_actr = sip_actr
 
     def new_tts_session(self, sip_sess_id):
-        rgen = InfernRTPGen(self.tts, lambda: self.sess_term(sip_sess_id))
+        rgen = TTSSession(self.tts, lambda: self.sess_term(sip_sess_id))
         self.sessions[rgen.id] = rgen
         return rgen.id
 
