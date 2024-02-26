@@ -26,13 +26,12 @@
 from time import monotonic
 from uuid import uuid4, UUID
 
-from sippy.Core.EventDispatcher import ED2
-
 from TTSRTPOutput import TTSSMarkerEnd, TTSSMarkerNewSent
 from Cluster.RemoteRTPGen import RemoteRTPGen
 from .InfernWrkThread import InfernWrkThread, RTPWrkTStop
 
 class InfernRTPGen(InfernWrkThread):
+    debug = True
     id: UUID
     tts = None
     ptime = 0.030
@@ -96,6 +95,10 @@ class InfernRTPGen(InfernWrkThread):
 
         self.worker.soundout(TTSSMarkerEnd())
         self.worker.join()
-        #ED2.callFromThread(self.sess_term)
+        self.sess_term()
         del self.sess_term
         del self.worker
+
+    def __del__(self):
+        if self.debug:
+            print('InfernRTPGen.__del__')
