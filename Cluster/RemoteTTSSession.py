@@ -5,10 +5,10 @@ class TTSSessionError(Exception):
     pass
 
 class RemoteTTSSession():
-    def __init__(self, tts_actr):
+    def __init__(self, tts_actr, sip_sess_id):
         super().__init__()
         self.tts_actr = tts_actr
-        try: self.sess_id = ray.get(tts_actr.new_tts_session.remote())
+        try: self.sess_id = ray.get(tts_actr.new_tts_session.remote(sip_sess_id))
         except RayTaskError as e: raise TTSSessionError("new_tts_session() failed") from e
 
     def start(self, text, target):
