@@ -12,14 +12,15 @@ class InfernTTSActor():
     sessions: dict
     tts: TTS
 
-    def __init__(self, rtp_actr):
+    def __init__(self, rtp_actr, sip_actr):
         super().__init__()
         self.sessions = {}
         self.tts = TTS()
         self.rtp_actr = rtp_actr
+        self.sip_actr = sip_actr
 
-    def new_tts_session(self):
-        rgen = InfernRTPGen(self.tts, self.sess_term)
+    def new_tts_session(self, sip_sess_id):
+        rgen = InfernRTPGen(self.tts, lambda: self.sess_term(sip_sess_id))
         self.sessions[rgen.id] = rgen
         return rgen.id
 
@@ -33,5 +34,6 @@ class InfernTTSActor():
         rgen.stop()
         del self.sessions[rgen_id]
 
-    def sess_term(self):
+    def sess_term(self, sip_sess_id):
         print('sess_term')
+        self.sip_actr.sess_term.remote(sip_sess_id)
