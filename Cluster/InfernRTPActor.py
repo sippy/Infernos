@@ -10,7 +10,7 @@ from ray import ray
 from sippy.Udp_server import Udp_server, Udp_server_opts
 from sippy.misc import local4remote
 
-from TTSRTPOutput import TTSRTPOutput,  TTSSMarkerGeneric
+from TTSRTPOutput import TTSRTPOutput,  TTSSMarkerGeneric, TTSSMarkerNewSent
 from SIP.InfernRTPIngest import InfernRTPIngest
 
 class InfernRTPEPoint():
@@ -18,6 +18,7 @@ class InfernRTPEPoint():
     devs = ('xpu' if ipex is not None else 'cuda', 'cpu')
     id: UUID
     dl_file = None
+    firstframe = True
     def __init__(self, rtp_target):
         self.id = uuid4()
         self.rtp_target = rtp_target
@@ -51,10 +52,21 @@ class InfernRTPEPoint():
         if self.debug:
             print('InfernRTPEPoint.__del__')
 
-@ray.remote(resources={"rtp": 1})
+
+    def soundout(self, chunk, stdtss):
+        ismark = isinstance(chunk, TTSSMarkerGeneric)
+        if self.firstframe or ismark:
+            print(f'{stdtss()}: soundout_rtp_session: {"mark" if ismark else "data"}')
+            self.firstframe = False
+        if ismark and isinstance(chunk, TTSSMarkerNewSent):
+            self.firstframe = True
+        if not ismark:
+            chunk = chunk.to(self.writer.device)
+        return self.writer.soundout(chunk)
+
+@ray.remote(resources={"_rtp": 1})
 class InfernRTPActor():
     sessions: dict
-    firstframe = True
     def __init__(self):
         self.sessions = {}
 
@@ -73,14 +85,8 @@ class InfernRTPActor():
         rep.writer.end()
 
     def soundout_rtp_session(self, rtp_id, chunk):
-        ismark = isinstance(chunk, TTSSMarkerGeneric)
-        if self.firstframe or ismark:
-            print(f'{self.stdtss()}: soundout_rtp_session: {"mark" if ismark else "data"}')
-            self.firstframe = False
         rep = self.sessions[rtp_id]
-        if not ismark:
-            chunk = chunk.to(rep.writer.device)
-        return rep.writer.soundout(chunk)
+        return rep.soundout(chunk, self.stdtss)
 
     def join_rtp_session(self, rtp_id):
         print(f'{self.stdtss()}: join_rtp_session')
