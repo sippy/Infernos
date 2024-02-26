@@ -38,6 +38,7 @@ class TTSSMarkerNewSentCB(TTSSMarkerNewSent):
         self.tts_sess_id = tts_sess.id
 
     def on_proc(self, tro_self):
+        print(f'{monotonic():4.3f}: TTSSMarkerNewSentCB.on_proc')
         self.tts_actr.tts_session_next_sentence.remote(self.tts_sess_id)
 
 class TTSSession(InfernWrkThread):
@@ -60,7 +61,6 @@ class TTSSession(InfernWrkThread):
         self.state_lock.acquire()
         self.worker = RemoteRTPGen(rtp_actr, target)
         self.text = text
-        self.speaker = self.tts.get_rand_voice()
         self.eos_m = TTSSMarkerNewSentCB(tts_actr, self)
         self.next_sentence_q = Queue()
         self.state_lock.release()
@@ -76,6 +76,7 @@ class TTSSession(InfernWrkThread):
         from time import sleep
         disconnected = False
         for i, p in enumerate(text):
+            speaker = self.tts.get_rand_voice()
             sents = p.split('|')
             for si, p in enumerate(sents):
                 if self.get_state() == RTPWrkTStop:
@@ -85,7 +86,7 @@ class TTSSession(InfernWrkThread):
                 #    sleep(0.5)
                 #    #print('sleept')
                 print(f'{monotonic():4.3f}: Playing', p)
-                self.tts.tts_rt(p, self.worker.soundout, self.speaker)
+                self.tts.tts_rt(p, self.worker.soundout, speaker)
                 self.worker.soundout(self.eos_m)
                 disconnected = not self.next_sentence_q.get()
                 if disconnected: break
