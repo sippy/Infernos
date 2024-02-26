@@ -23,6 +23,8 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 # SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+from uuid import uuid4, UUID
+
 from sippy.UA import UA
 from sippy.CCEvents import CCEventTry, CCEventConnect, CCEventFail
 from sippy.MsgBody import MsgBody
@@ -80,10 +82,13 @@ class InfernUASFailure(CCEventFail):
                                 reason=reason)
 
 class InfernTTSUAS(UA):
+    debug = True
+    id: UUID
     _tsess: RemoteTTSSession = None
 
     def __init__(self, sippy_c, tts_actr, req, sip_t):
-        self._tsess = RemoteTTSSession(tts_actr)
+        self.id = uuid4()
+        self._tsess = RemoteTTSSession(tts_actr, self.id)
         super().__init__(sippy_c, self.outEvent)
         assert sip_t.noack_cb is None
         sip_t.noack_cb = self.sess_term
@@ -132,3 +137,7 @@ class InfernTTSUAS(UA):
         self._tsess = None
         if ua != self:
             self.disconnect()
+
+    def __del__(self):
+        if self.debug:
+            print('InfernUAS.__del__')
