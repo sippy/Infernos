@@ -38,7 +38,7 @@ class TTSSMarkerNewSentCB(TTSSMarkerNewSent):
         self.tts_sess_id = tts_sess.id
 
     def on_proc(self, tro_self):
-        self.tts_actr.tts_session_eos.remote(self.tts_sess_id)
+        self.tts_actr.tts_session_next_sentence.remote(self.tts_sess_id)
 
 class TTSSession(InfernWrkThread):
     debug = True
@@ -47,7 +47,7 @@ class TTSSession(InfernWrkThread):
     ptime = 0.030
     worker: RemoteRTPGen
     eos_m: TTSSMarkerNewSentCB
-    eos_q: Queue
+    next_sentence_q: Queue
 
     def __init__(self, tts, sess_term):
         super().__init__()
@@ -62,7 +62,7 @@ class TTSSession(InfernWrkThread):
         self.text = text
         self.speaker = self.tts.get_rand_voice()
         self.eos_m = TTSSMarkerNewSentCB(tts_actr, self)
-        self.eos_q = Queue()
+        self.next_sentence_q = Queue()
         self.state_lock.release()
         super().start()
         return self.worker.rtp_address
@@ -87,7 +87,7 @@ class TTSSession(InfernWrkThread):
                 print(f'{monotonic():4.3f}: Playing', p)
                 self.tts.tts_rt(p, self.worker.soundout, self.speaker)
                 self.worker.soundout(self.eos_m)
-                disconnected = not self.eos_q.get()
+                disconnected = not self.next_sentence_q.get()
                 if disconnected: break
                 print(f'{monotonic():4.3f}: Done playing', p)
                 ##while self.get_state() != RTPWrkTStop and \
@@ -114,16 +114,18 @@ class TTSSession(InfernWrkThread):
 
         self.worker.soundout(TTSSMarkerEnd())
         self.worker.join()
+        if not disconnected:
+            self.sess_term()
         self.sess_term()
         del self.sess_term
         del self.worker
 
-    def eos(self):
-        print(f'{monotonic():4.3f}: TTSSession.eos')
-        self.eos_q.put(True)
+    def next_sentence(self):
+        print(f'{monotonic():4.3f}: TTSSession.next_sentence')
+        self.next_sentence_q.put(True)
 
     def stop(self):
-        self.eos_q.put(False)
+        self.next_sentence_q.put(False)
         super().stop()
 
     def __del__(self):

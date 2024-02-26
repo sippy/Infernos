@@ -75,7 +75,7 @@ class InfernRTPActor():
     def soundout_rtp_session(self, rtp_id, chunk):
         ismark = isinstance(chunk, TTSSMarkerGeneric)
         if self.firstframe or ismark:
-            print(f'{self.stdtss()}: soundout_rtp_session')
+            print(f'{self.stdtss()}: soundout_rtp_session: {"mark" if ismark else "data"}')
             self.firstframe = False
         rep = self.sessions[rtp_id]
         if not ismark:

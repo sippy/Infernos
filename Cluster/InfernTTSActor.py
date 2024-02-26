@@ -30,9 +30,9 @@ class InfernTTSActor():
         rtp_address = rgen.start(self.tts_actr, self.rtp_actr, text, target)
         return rtp_address
 
-    def tts_session_eos(self, rgen_id):
+    def tts_session_next_sentence(self, rgen_id):
         rgen = self.sessions[rgen_id]
-        rgen.eos()
+        rgen.next_sentence()
 
     def end_tts_session(self, rgen_id):
         rgen = self.sessions[rgen_id]
