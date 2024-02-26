@@ -36,6 +36,7 @@ def float_to_ulaw(audio_tensor):
     return audio_ulaw
 
 class TTSRTPOutput(threading.Thread):
+    debug = True
     pre_frames = 2
     _frame_size = 256
     debug = False
@@ -231,7 +232,8 @@ class TTSRTPOutput(threading.Thread):
                         print(f'consume_audio, sleep({ptime - etime})')
 
     def __del__(self):
-        print('__del__')
+        if self.debug:
+            print('TTSRTPOutput.__del__')
         #self.worker_thread.join()
         if self.data_log is None:
             return

@@ -14,6 +14,7 @@ from TTSRTPOutput import TTSRTPOutput,  TTSSMarkerGeneric
 from SIP.InfernRTPIngest import InfernRTPIngest
 
 class InfernRTPEPoint():
+    debug = True
     devs = ('xpu' if ipex is not None else 'cuda', 'cpu')
     id: UUID
     dl_file = None
@@ -38,6 +39,17 @@ class InfernRTPEPoint():
 
     def send_pkt(self, pkt):
         self.rserv.send_to(pkt, self.rtp_target)
+
+    def shutdown(self):
+        self.writer.join()
+        self.ring.stop()
+        self.ring.join()
+        self.rserv.shutdown()
+        self.ring, self.rserv, self.writer = (None, None, None)
+
+    def __del__(self):
+        if self.debug:
+            print('InfernRTPEPoint.__del__')
 
 @ray.remote(resources={"rtp": 1})
 class InfernRTPActor():
@@ -73,10 +85,7 @@ class InfernRTPActor():
     def join_rtp_session(self, rtp_id):
         print(f'{self.stdtss()}: join_rtp_session')
         rep = self.sessions[rtp_id]
-        rep.writer.join()
-        rep.ring.stop()
-        rep.ring.join()
-        rep.rserv.shutdown()
+        rep.shutdown()
         del self.sessions[rtp_id]
 
     def loop(self):
