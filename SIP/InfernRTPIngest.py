@@ -1,8 +1,10 @@
+from typing import Optional
 from queue import Queue, Empty as QueueEmpty
 
-from rtpsynth.RtpJBuf import RtpJBuf, RTPParseError
+from rtpsynth.RtpJBuf import RtpJBuf, RTPFrameType, RTPParseError
 
 from Core.InfernWrkThread import InfernWrkThread, RTPWrkTRun
+from Core.VAD.ZlibVAD import ZlibVAD
 
 class InfernRTPIngest(InfernWrkThread):
     debug = True
@@ -11,10 +13,13 @@ class InfernRTPIngest(InfernWrkThread):
     input_sr: int = 8000
     output_sr: int
     codec: str = "PCMU"
+    last_output_lseq: Optional[int] = None
+    vad: ZlibVAD
     def __init__(self, output_sr: int = 16000):
         super().__init__()
         self.pkt_queue = Queue()
         self.output_sr = output_sr
+        self.vad = ZlibVAD(self.input_sr)
 #        self.start()
 
     def dprint(self, *args):
@@ -40,6 +45,18 @@ class InfernRTPIngest(InfernWrkThread):
             npkts += 1
             if npkts == 1:
                 self.dprint(f"InfernRTPIngest.run: address={address}, rtime={rtime}, len(data) = {len(data)} data={data[:40]}")
+            for pkt in res:
+                assert pkt.content.type != RTPFrameType.ERS
+                if npkts < 10:
+                    self.dprint(f"InfernRTPIngest.run: {pkt.content.frame.rtp.lseq=}")
+                assert self.last_output_lseq is None or pkt.content.frame.rtp.lseq == self.last_output_lseq + 1
+                self.last_output_lseq = pkt.content.frame.rtp.lseq
+                if npkts < 10:
+                    self.dprint(f"InfernRTPIngest.run: {len(pkt.rtp_data)=}, {type(pkt.rtp_data)=}")
+                out = self.vad.ingest(pkt.rtp_data)
+                if out is None: continue
+                if out.active: self.dprint(f"InfernRTPIngest.run: active chunk: {len(out.chunk)}")
+                else: self.dprint(f"InfernRTPIngest.run: inactive chunk: {len(out.chunk)}")
             if npkts < 10 and len(res) > 0:
                 self.dprint(f"InfernRTPIngest.run: res = {res}")
         if data is not None:
