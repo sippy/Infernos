@@ -1,14 +1,13 @@
 import torch
 import soundfile as sf
-import torchaudio.transforms as T
-
-import audioop
 
 import queue
 import threading
 from time import monotonic, sleep
 
 from rtpsynth.RtpSynth import RtpSynth
+
+from Core.Codecs.G711 import G711Codec
 
 class TTSSMarkerGeneric():
     pass
@@ -19,22 +18,6 @@ class TTSSMarkerNewSent(TTSSMarkerGeneric):
 
 class TTSSMarkerEnd(TTSSMarkerGeneric):
     pass
-
-ulaw_ct = torch.zeros(65536, dtype=torch.uint8)
-for i in range(-32768, 32768):
-    pcm_data = i.to_bytes(2, 'little', signed=True)
-    ulaw_data = audioop.lin2ulaw(pcm_data, 2)
-    ulaw_value = ulaw_data[0]  # Get the byte value from bytes
-    ulaw_ct[i + 32768] = ulaw_value  # Shift index to make it non-negative
-
-def float_to_ulaw(audio_tensor):
-    # Scale from [-1, 1] to [-32768, 32767]
-    audio_scaled = torch.clamp(audio_tensor * 32767.0, -32768, 32767).to(torch.int16)
-
-    # Shift and look up in the conversion table
-    audio_ulaw = ulaw_ct[(audio_scaled + 32768).long()]
-
-    return audio_ulaw
 
 class TTSRTPOutput(threading.Thread):
     debug = True
@@ -49,11 +32,9 @@ class TTSRTPOutput(threading.Thread):
     frames_rcvd = 0
     frames_prcsd = 0
     has_ended = False
+    codec: G711Codec
 
     def __init__(self, num_mel_bins, device, vocoder=None):
-        global ulaw_ct
-        if ulaw_ct.device != device:
-            ulaw_ct = ulaw_ct.to(device)
         self.itime = monotonic()
         self.vocoder = vocoder
         self.num_mel_bins = num_mel_bins
@@ -62,6 +43,7 @@ class TTSRTPOutput(threading.Thread):
         #    self.data, _ = sf.read(self.ofname)
         self.data_queue = queue.Queue()
         self.samplerate = 16000
+        self.codec = G711Codec(self.samplerate).to(device)
         self.state_lock = threading.Lock()
         super().__init__(target=self.consume_audio)
         self.daemon = True
@@ -121,9 +103,6 @@ class TTSRTPOutput(threading.Thread):
                               self.num_mel_bins,
                               device=self.vocoder.device)
             pf_trim = self.pre_frames * self._frame_size
-        resampler = T.Resample(orig_freq=self.samplerate,
-                               new_freq=out_sr
-                               ).to(self.device)
         nchunk = 0
         btime = None
         chunk = torch.empty(0).to(self.device)
@@ -192,7 +171,7 @@ class TTSRTPOutput(threading.Thread):
                 stime = ctime
 
             sz = chunk_o_n.size(0)
-            chunk_o_n = resampler(chunk_o_n)
+            chunk_o_n = self.codec.resampler[0](chunk_o_n)
             assert chunk_o_n.size(0) == sz / 2
             chunk_o = torch.cat((chunk_o, chunk_o_n), dim=0)
 
@@ -213,7 +192,7 @@ class TTSRTPOutput(threading.Thread):
                 #print(packet.size())
                 #packet = (packet * 20000).to(torch.int16)
                 #packet = packet.byte().cpu().numpy()
-                packet = float_to_ulaw(packet).cpu().numpy()
+                packet = self.codec.encode(packet, resample=False).cpu().numpy()
                 #print('packet', packet.min(), packet.max(), packet[:10])
                 packet = packet.tobytes()
                 #print(len(packet), packet[:10])

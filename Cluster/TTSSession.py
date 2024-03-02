@@ -23,16 +23,17 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 # SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+from typing import Optional, Union, List
 from time import monotonic
 from uuid import uuid4, UUID
 from queue import Queue
 
 from TTSRTPOutput import TTSSMarkerEnd, TTSSMarkerNewSent
-from Cluster.RemoteRTPGen import RemoteRTPGen
-from Core.InfernWrkThread import InfernWrkThread, RTPWrkTStop
+from Cluster.RemoteRTPGen import RemoteRTPGenFromId
+from Core.InfernWrkThread import InfernWrkThread, RTPWrkTStop, RTPWrkTInit
 
 class TTSSMarkerNewSentCB(TTSSMarkerNewSent):
-    def __init__(self, tts_actr, tts_sess):
+    def __init__(self, tts_actr, tts_sess: 'TTSSession'):
         super().__init__()
         self.tts_actr = tts_actr
         self.tts_sess_id = tts_sess.id
@@ -41,75 +42,60 @@ class TTSSMarkerNewSentCB(TTSSMarkerNewSent):
         print(f'{monotonic():4.3f}: TTSSMarkerNewSentCB.on_proc')
         self.tts_actr.tts_session_next_sentence.remote(self.tts_sess_id)
 
+class TTSRequest():
+    text: str
+    speaker = None
+    final: bool
+    def __init__(self, text: str, speaker, final: bool = False):
+        self.text = text
+        self.speaker = speaker
+        self.final = final
+
 class TTSSession(InfernWrkThread):
     debug = True
     id: UUID
     tts = None
     ptime = 0.030
-    worker: RemoteRTPGen
+    worker: RemoteRTPGenFromId
     eos_m: TTSSMarkerNewSentCB
-    next_sentence_q: Queue
+    next_sentence_q: Queue[TTSRequest]
+    autoplay = True
 
     def __init__(self, tts, sess_term):
         super().__init__()
         self.id = uuid4()
         self.tts = tts
         self.sess_term = sess_term
-        self.setDaemon(True)
 
-    def start(self, tts_actr, rtp_actr, text, target):
+    def start(self, tts_actr, rtp_actr, rtp_sess_id, text):
+        worker = RemoteRTPGenFromId(rtp_actr, rtp_sess_id)
         self.state_lock.acquire()
-        self.worker = RemoteRTPGen(rtp_actr, target)
-        self.text = text
+        assert self.get_state(locked=True) == RTPWrkTInit
+        self.worker = worker
+        self.text = [text,] if type(text) == str else text
         self.eos_m = TTSSMarkerNewSentCB(tts_actr, self)
         self.next_sentence_q = Queue()
         self.state_lock.release()
         super().start()
-        return self.worker.rtp_address
+        # XXX kick-in the worker
+        self.next_sentence()
 
     def run(self):
         super().thread_started()
-        if type(self.text) == str:
-            text = (self.text,)
-        else:
-            text = self.text
-        from time import sleep
         disconnected = False
-        for i, p in enumerate(text):
-            speaker = self.tts.get_rand_voice()
-            sents = p.split('|')
-            for si, p in enumerate(sents):
-                if self.get_state() == RTPWrkTStop:
-                    break
-                #if si > 0:
-                #    from time import sleep
-                #    sleep(0.5)
-                #    #print('sleept')
+        while self.get_state() != RTPWrkTStop:
+            sent = self.next_sentence_q.get()
+            if sent is None: break
+            sents = sent.text.split('|')
+            for i, p in enumerate(sents):
+                if self.get_state() == RTPWrkTStop: break
                 print(f'{monotonic():4.3f}: Playing', p)
-                self.tts.tts_rt(p, self.worker.soundout, speaker)
-                self.worker.soundout(self.eos_m)
-                disconnected = not self.next_sentence_q.get()
-                if disconnected: break
-                print(f'{monotonic():4.3f}: Done playing', p)
-                ##while self.get_state() != RTPWrkTStop and \
-                ##        self.worker.data_queue.qsize() > 3:
-                ##    sleep(0.3)
-                ##print(f'get_frm_ctrs={self.worker.get_frm_ctrs()}')
-                ##print(f'data_queue.qsize()={self.worker.data_queue.qsize()}')
-            if disconnected: break
-        ##while True:
-        ##    if self.get_state() == RTPWrkTStop:
-        ##        self.worker.end()
-        ##        break
-        ##    if self.worker.data_queue.qsize() > 0:
-        ##        sleep(0.1)
-        ##        continue
-        ##    cntrs = self.worker.get_frm_ctrs()
-        ##    if cntrs[0] < cntrs[1]:
-        ##        print(f'{cntrs[0]} < {cntrs[1]}')
-        ##        sleep(0.01)
-        ##        continue
-        ##    break
+                self.tts.tts_rt(p, self.worker.soundout, sent.speaker)
+                if not sent.final or i < len(sents) - 1:
+                    self.worker.soundout(self.eos_m)
+            if sent.final:
+                disconnected = True
+                break
         if self.get_state() == RTPWrkTStop:
             self.worker.end()
 
@@ -122,11 +108,25 @@ class TTSSession(InfernWrkThread):
         del self.worker
 
     def next_sentence(self):
+        if not self.autoplay: return
         print(f'{monotonic():4.3f}: TTSSession.next_sentence')
-        self.next_sentence_q.put(True)
+        speaker = self.tts.get_rand_voice()
+        sent = self.text.pop(0)
+        final = (len(self.text) == 0)
+        self.next_sentence_q.put(TTSRequest(sent, speaker, final))
+
+    def stopintro(self):
+        print(f'{monotonic():4.3f}: TTSSession.stopintro')
+        self.autoplay = False
+
+    def say(self, text):
+        if self.autoplay: return
+        print(f'{monotonic():4.3f}: TTSSession.say')
+        speaker = self.tts.get_rand_voice()
+        self.next_sentence_q.put(TTSRequest(text, speaker))
 
     def stop(self):
-        self.next_sentence_q.put(False)
+        self.next_sentence_q.put(None)
         super().stop()
 
     def __del__(self):

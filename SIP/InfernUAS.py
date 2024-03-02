@@ -25,6 +25,8 @@
 
 from uuid import uuid4, UUID
 
+import ray
+
 from sippy.UA import UA
 from sippy.CCEvents import CCEventTry, CCEventConnect, CCEventFail
 from sippy.MsgBody import MsgBody
@@ -33,7 +35,7 @@ from sippy.SipConf import SipConf
 from sippy.SdpMedia import MTAudio
 from sippy.SipReason import SipReason
 
-from Cluster.RemoteRTPGen import RTPGenError
+from Cluster.RemoteRTPGen import RemoteRTPGen, RTPGenError
 from Cluster.RemoteTTSSession import RemoteTTSSession, TTSSessionError
 
 from utils.tts import human_readable_time, hal_set, smith_set, \
@@ -86,9 +88,11 @@ class InfernTTSUAS(UA):
     id: UUID
     _tsess: RemoteTTSSession = None
 
-    def __init__(self, sippy_c, tts_actr, req, sip_t):
+    def __init__(self, sippy_c, tts_actr, stt_actr, rtp_actr, req, sip_t):
         self.id = uuid4()
+        self.rtp_actr = rtp_actr
         self._tsess = RemoteTTSSession(tts_actr, self.id)
+        self.stt_sess_id = stt_actr.new_stt_session.remote(self._tsess.sess_id)
         super().__init__(sippy_c, self.outEvent)
         assert sip_t.noack_cb is None
         sip_t.noack_cb = self.sess_term
@@ -118,7 +122,9 @@ class InfernTTSUAS(UA):
         body = model_body.getCopy()
         sect = body.content.sections[0]
         try:
-            rtp_laddress = self._tsess.start(self.getPrompts(), rtp_target)
+            rsess = RemoteRTPGen(self.rtp_actr, ray.get(self.stt_sess_id), rtp_target)
+            self._tsess.start(self.getPrompts(), rsess.sess_id)
+            rtp_laddress = rsess.rtp_address
         except RTPGenError as e:
             event = InfernUASFailure(code=500, reason=str(e))
             self.recvEvent(event)

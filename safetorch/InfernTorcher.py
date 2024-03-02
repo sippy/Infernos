@@ -23,6 +23,7 @@ class InfernTorcher():
     _last_unlock: float
     _free_time: rc_filter
     _busy_time: rc_filter
+    _nlocks: int = 0
 
     def __init__(self):
         self._torch_lock = Lock()
@@ -45,8 +46,11 @@ class InfernTorcher():
         bt = self._busy_time(busy_time)
         ft = self._free_time.last_y
         self._last_unlock = now
+        self._nlocks += 1
+        nlocks = self._nlocks
         self._torch_lock.release()
-        print(f"Torch load: {bt / (bt + ft)}")
+        if nlocks % 10:
+            print(f"Torch load: {bt / (bt + ft)}")
 
     def acquire(self):
         return self.lock()

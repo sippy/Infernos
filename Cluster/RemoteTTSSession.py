@@ -11,8 +11,8 @@ class RemoteTTSSession():
         try: self.sess_id = ray.get(tts_actr.new_tts_session.remote(sip_sess_id))
         except RayTaskError as e: raise TTSSessionError("new_tts_session() failed") from e
 
-    def start(self, text, target):
-        return ray.get(self.tts_actr.start_tts_session.remote(self.sess_id, text, target))
+    def start(self, text, rtp_sess_id):
+        return ray.get(self.tts_actr.start_tts_session.remote(self.sess_id, rtp_sess_id, text))
 
     def end(self):
         return ray.get(self.tts_actr.end_tts_session.remote(self.sess_id))

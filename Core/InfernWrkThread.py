@@ -31,7 +31,7 @@ RTPWrkTStop = 2
 
 class InfernWrkThread(Thread):
     state_lock: Lock = None
-    state = RTPWrkTInit
+    state: int = RTPWrkTInit
 
     def __init__(self):
         self.state_lock = Lock()
@@ -41,10 +41,10 @@ class InfernWrkThread(Thread):
     def start(self):
         super().start()
 
-    def get_state(self):
-        self.state_lock.acquire()
+    def get_state(self, locked=False):
+        if not locked: self.state_lock.acquire()
         state = self.state
-        self.state_lock.release()
+        if not locked: self.state_lock.release()
         return state
 
     def _set_state(self, newstate, expected_state = None, raise_on_error = True):

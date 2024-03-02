@@ -47,15 +47,16 @@ class InfernSIP(object):
     body = None
     ragent = None
     tts_actr = None
+    stt_actr = None
     sippy_c = None
     sessions: WeakValueDictionary
 
-    def __init__(self, tts_actr, iao):
+    def __init__(self, tts_actr, stt_actr, rtp_actr, iao):
         self.sippy_c = {'nh_addr':tuple(iao.nh_addr),
                         '_sip_address':iao.laddr,
                         '_sip_port':iao.lport,
                         '_sip_logger':iao.logger}
-        self.tts_actr = tts_actr
+        self.tts_actr, self.stt_actr, self.rtp_actr = tts_actr, stt_actr, rtp_actr
         self.sessions = WeakValueDictionary()
         self._o = iao
         udsc, udsoc = SipTransactionManager.model_udp_server
@@ -82,7 +83,7 @@ class InfernSIP(object):
             #if self.rserv != None:
             #    return (req.genResponse(486, 'Busy Here'), None, None)
             # New dialog
-            isess = InfernTTSUAS(self.sippy_c, self.tts_actr, req, sip_t)
+            isess = InfernTTSUAS(self.sippy_c, self.tts_actr, self.stt_actr, self.rtp_actr, req, sip_t)
             self.sessions[isess.id] = isess
             return
         return (req.genResponse(501, 'Not Implemented'), None, None)
