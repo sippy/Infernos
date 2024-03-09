@@ -5,6 +5,7 @@ from rtpsynth.RtpJBuf import RtpJBuf, RTPFrameType, RTPParseError
 
 from Core.InfernWrkThread import InfernWrkThread, RTPWrkTRun
 from Core.VAD.ZlibVAD import ZlibVAD
+from Core.Codecs.G711 import G711Codec
 
 class InfernRTPIngest(InfernWrkThread):
     debug = True
@@ -15,11 +16,14 @@ class InfernRTPIngest(InfernWrkThread):
     codec: str = "PCMU"
     last_output_lseq: Optional[int] = None
     vad: ZlibVAD
-    def __init__(self, output_sr: int = 16000):
+    codec: G711Codec
+    def __init__(self, chunk_in, device, output_sr: int = 16000):
         super().__init__()
         self.pkt_queue = Queue()
         self.output_sr = output_sr
         self.vad = ZlibVAD(self.input_sr)
+        self.chunk_in = chunk_in
+        self.codec = G711Codec(self.output_sr).to(device)
 #        self.start()
 
     def dprint(self, *args):
@@ -55,8 +59,9 @@ class InfernRTPIngest(InfernWrkThread):
                     self.dprint(f"InfernRTPIngest.run: {len(pkt.rtp_data)=}, {type(pkt.rtp_data)=}")
                 out = self.vad.ingest(pkt.rtp_data)
                 if out is None: continue
-                if out.active: self.dprint(f"InfernRTPIngest.run: active chunk: {len(out.chunk)}")
-                else: self.dprint(f"InfernRTPIngest.run: inactive chunk: {len(out.chunk)}")
+                chunk = self.codec.decode(out.chunk)
+                self.dprint(f"InfernRTPIngest.run: active chunk: {len(chunk)=}")
+                self.chunk_in(chunk)
             if npkts < 10 and len(res) > 0:
                 self.dprint(f"InfernRTPIngest.run: res = {res}")
         if data is not None:
@@ -66,6 +71,7 @@ class InfernRTPIngest(InfernWrkThread):
     def stop(self):
         super().stop()
         self.dprint("InfernRTPIngest stopped")
+        del self.chunk_in
 
     def rtp_received(self, data, address, udp_server, rtime):
         #self.dprint(f"InfernRTPIngest.rtp_received: len(data) = {len(data)}")

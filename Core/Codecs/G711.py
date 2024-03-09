@@ -1,4 +1,6 @@
+from typing import Optional, Tuple
 import torch
+import torchaudio.transforms as T
 import audioop
 
 _pcm_to_ulaw_ct = torch.zeros(65536, dtype=torch.uint8)
@@ -16,10 +18,15 @@ for i in range(256):
     _ulaw_to_pcm_ct[i] = pcm_value
 
 class G711Codec:
-    #def __init__(self, sample_rate: int):
-    #    self.sample_rate = sample_rate
+    default_sr:int = 8000
+    resampler: Optional[Tuple[T.Resample]] = None
+    def __init__(self, sample_rate: int = default_sr):
+        if sample_rate != self.default_sr:
+            self.resampler = (T.Resample(orig_freq=sample_rate, new_freq=self.default_sr),
+                              T.Resample(orig_freq=self.default_sr, new_freq=sample_rate))
 
-    def encode(self, audio_tensor: torch.Tensor):
+    def encode(self, audio_tensor: torch.Tensor, resample: bool = True):
+        if resample and self.resampler: audio_tensor = self.resampler[0](audio_tensor)
         # Scale from [-1, 1] to [-32768, 32767]
         audio_scaled = torch.clamp(audio_tensor * 32767.0, -32768, 32767).to(torch.int16)
 
@@ -28,7 +35,7 @@ class G711Codec:
 
         return audio_ulaw
 
-    def decode(self, ulaw_bytes: bytes):
+    def decode(self, ulaw_bytes: bytes, resample: bool = True):
         # Convert byte string to a tensor of uint8
         ulaw_tensor = torch.tensor(list(ulaw_bytes), dtype=torch.uint8)
 
@@ -38,14 +45,19 @@ class G711Codec:
         # Scale from [-32768, 32767] to [-1, 1]
         audio_float = audio_pcm.float() / 32767.0
 
+        if resample and self.resampler: audio_float = self.resampler[1](audio_float)
+
         return audio_float
 
     def device(self):
+        global _pcm_to_ulaw_ct, _ulaw_to_pcm_ct
         assert _pcm_to_ulaw_ct.device == _ulaw_to_pcm_ct.device
         return _pcm_to_ulaw_ct.device
 
     def to(self, device):
         global _pcm_to_ulaw_ct, _ulaw_to_pcm_ct
+        assert _pcm_to_ulaw_ct.device == _ulaw_to_pcm_ct.device
         _pcm_to_ulaw_ct = _pcm_to_ulaw_ct.to(device)
         _ulaw_to_pcm_ct = _ulaw_to_pcm_ct.to(device)
+        self.resampler = (self.resampler[0].to(device), self.resampler[1].to(device)) if self.resampler else None
         return self
