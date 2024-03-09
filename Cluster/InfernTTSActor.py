@@ -4,18 +4,17 @@ except ModuleNotFoundError: ipex = None
 import ray
 
 from Cluster.TTSSession import TTSSession
-
-from TTS import TTS
+from Cluster.InfernTTSWorker import InfernTTSWorker
 
 @ray.remote
 class InfernTTSActor():
     sessions: dict
-    tts: TTS
+    tts: InfernTTSWorker
 
     def __init__(self, rtp_actr, sip_actr):
         super().__init__()
         self.sessions = {}
-        self.tts = TTS()
+        self.tts = InfernTTSWorker()
         self.rtp_actr = rtp_actr
         self.sip_actr = sip_actr
         self.tts_actr = ray.get_runtime_context().current_actor

@@ -7,7 +7,7 @@ from HelloSippyTTSRT.HelloSippyRT import HelloSippyRT
 
 from TTSRTPOutput import TTSRTPOutput, TTSSMarkerEnd
 
-class TTS(HelloSippyRT):
+class InfernTTSWorker(HelloSippyRT):
     device = 'cuda' if ipex is None else 'xpu'
     debug = False
 
@@ -40,7 +40,7 @@ class TTS(HelloSippyRT):
         writer.soundout(TTSSMarkerEnd())
 
 if __name__ == '__main__':
-    tts = TTS()
+    tts = InfernTTSWorker()
     prompts = (
         "Hello and welcome to Sippy Software, your VoIP solution provider.",
         "Today is Wednesday twenty third of August two thousand twenty three, five thirty in the afternoon.",
