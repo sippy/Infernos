@@ -4,7 +4,7 @@ from queue import Queue, Empty as QueueEmpty
 import torch
 import ctranslate2
 import transformers
-
+import soundfile as sf
 
 from Core.InfernWrkThread import InfernWrkThread, RTPWrkTRun
 from Cluster.STTSession import STTSession
@@ -32,6 +32,8 @@ class InfernSTTWorker(InfernWrkThread):
         wi.stt_sess, wi.audio, wi.res_queue = stt_sess, audio, res_queue
         self.inf_queue.put(wi)
 
+    idx: int = 0
+
     def next_batch(self):
         wis = []
         while len(wis) < self.max_batch_size:
@@ -42,6 +44,8 @@ class InfernSTTWorker(InfernWrkThread):
                 except QueueEmpty: break
             if wi is None:
                 return None
+            sf.write(f'/tmp/wi{self.idx}.wav', wi.audio, samplerate=16000)
+            self.idx += 1
             wis.append(wi)
         return wis
 
