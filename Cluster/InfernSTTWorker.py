@@ -67,7 +67,7 @@ class InfernSTTWorker(InfernWrkThread):
                 [
                     "<|startoftranscript|>",
                    f"<|{language}|>",
-                    "<|transcribe|>",
+                    "<|translate|>",
                     "<|notimestamps|>",  # Remove this token to generate timestamps.
                 ]) for language in (wi.stt_sess.lang for wi in wis)]
             results = self.model.generate(features, prompt)
