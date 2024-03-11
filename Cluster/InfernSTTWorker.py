@@ -72,7 +72,7 @@ class InfernSTTWorker(InfernWrkThread):
                 ]) for language in (wi.stt_sess.lang for wi in wis)]
             results = self.model.generate(features, prompt, return_no_speech_prob=True)
             print(f'{results=}')
-            for r in (_r for _r in results if r.no_speech_prob <= 0.3): print(self.processor.decode(r.sequences_ids[0]))
+            for r in (_r for _r in results if _r.no_speech_prob <= 0.3): print(self.processor.decode(r.sequences_ids[0]))
             #with torch.no_grad():
             #    audio = wi.audio.to(self.device)
             #    res = wi.stt_sess.model(audio)
