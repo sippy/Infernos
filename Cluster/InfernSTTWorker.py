@@ -20,6 +20,7 @@ class InfernSTTWorker(InfernWrkThread):
     processor: transformers.WhisperProcessor
     device: str
     inf_queue: Queue[Optional[STTWI]]
+    sample_rate: int = 8000
     def __init__(self, device: str):
         super().__init__()
         self.model = ctranslate2.models.Whisper("whisper-large-v3.ct2", device=device, compute_type="int8")
@@ -44,7 +45,7 @@ class InfernSTTWorker(InfernWrkThread):
                 except QueueEmpty: break
             if wi is None:
                 return None
-            sf.write(f'/tmp/wi{self.idx}.wav', wi.audio, samplerate=16000)
+            sf.write(f'/tmp/wi{self.idx}.wav', wi.audio, samplerate=self.sample_rate)
             self.idx += 1
             wis.append(wi)
         return wis
@@ -57,7 +58,7 @@ class InfernSTTWorker(InfernWrkThread):
                 break
             print(f'InfernSTTWorker.run: got {wis} from inf_queue')
             audios = [wi.audio for wi in wis]
-            inputs = self.processor(audios, return_tensors="np", sampling_rate=16000)
+            inputs = self.processor(audios, return_tensors="np", sampling_rate=self.sample_rate)
             features = ctranslate2.StorageView.from_array(inputs.input_features)
             results = self.model.detect_language(features)
             print(f'{results=}')
