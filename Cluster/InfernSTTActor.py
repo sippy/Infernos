@@ -1,23 +1,30 @@
-try: import intel_extension_for_pytorch as ipex
-except ModuleNotFoundError: ipex = None
+#try: import intel_extension_for_pytorch as ipex
+#except ModuleNotFoundError: ipex = None
 
 import ray
 
+from Cluster.InfernSTTWorker import InfernSTTWorker
 from Cluster.STTSession import STTSession
 
 #from STT import STT
 
-@ray.remote
+@ray.remote(resources={"stt": 1})
 class InfernSTTActor():
     debug = True
     sessions: dict
-#    stt: STT
+    stt: InfernSTTWorker
 
     def __init__(self):
         super().__init__()
         self.sessions = {}
         #self.stt = STT()
-        self.stt = None
+
+    def start(self):
+        self.stt = InfernSTTWorker('cuda')
+        self.stt.start()
+
+    def stop(self):
+        self.stt.stop()
 
     def new_stt_session(self):
         if self.debug: print('InfernSTTActor.new_stt_session')
