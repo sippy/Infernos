@@ -20,7 +20,7 @@ class InfernSTTWorker(InfernWrkThread):
     processor: transformers.WhisperProcessor
     device: str
     inf_queue: Queue[Optional[STTWI]]
-    sample_rate: int = 8000
+    sample_rate: int = 16000
     def __init__(self, device: str):
         super().__init__()
         self.model = ctranslate2.models.Whisper("whisper-large-v3.ct2", device=device, compute_type="int8")
