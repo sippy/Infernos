@@ -56,6 +56,7 @@ class InfernSTTWorker(InfernWrkThread):
             inputs = self.processor(audios, return_tensors="np", sampling_rate=16000)
             features = ctranslate2.StorageView.from_array(inputs.input_features)
             results = self.model.detect_language(features)
+            print(f'{results=}')
             prompt = [self.processor.tokenizer.convert_tokens_to_ids(
                 [
                     "<|startoftranscript|>",
@@ -64,6 +65,7 @@ class InfernSTTWorker(InfernWrkThread):
                     "<|notimestamps|>",  # Remove this token to generate timestamps.
                 ]) for language in (r[0][0] for r in results)]
             results = self.model.generate(features, prompt)
+            print(f'{results=}')
             for r in results: print(self.processor.decode(r.sequences_ids[0]))
             #with torch.no_grad():
             #    audio = wi.audio.to(self.device)
