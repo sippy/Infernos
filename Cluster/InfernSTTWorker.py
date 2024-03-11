@@ -23,8 +23,6 @@ class InfernSTTWorker(InfernWrkThread):
         super().__init__()
         self.model = ctranslate2.models.Whisper("whisper-large-v3.ct2", device=device, compute_type="int8")
         self.processor = transformers.WhisperProcessor.from_pretrained("openai/whisper-large-v3")
-        self.processor.eval()
-        #self.model.eval()
         self.inf_queue = Queue()
         self.device = device
 
