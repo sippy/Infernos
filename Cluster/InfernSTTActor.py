@@ -8,7 +8,7 @@ from Cluster.STTSession import STTSession
 
 #from STT import STT
 
-@ray.remote(resources={"stt": 1})
+@ray.remote(num_gpus=1, resources={"stt": 1})
 class InfernSTTActor():
     debug = True
     sessions: dict
