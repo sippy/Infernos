@@ -60,15 +60,16 @@ class InfernSTTWorker(InfernWrkThread):
             audios = [wi.audio for wi in wis]
             inputs = self.processor(audios, return_tensors="np", sampling_rate=self.sample_rate)
             features = ctranslate2.StorageView.from_array(inputs.input_features)
-            results = self.model.detect_language(features)
-            print(f'{results=}')
+            #ldet = dict([(i, features[i]) for i, wi in enumerate(wis) if wi.stt_sess.lang is None])
+            #results = self.model.detect_language(features)
+            #print(f'{results=}')
             prompt = [self.processor.tokenizer.convert_tokens_to_ids(
                 [
                     "<|startoftranscript|>",
                     language,
                     "<|transcribe|>",
                     "<|notimestamps|>",  # Remove this token to generate timestamps.
-                ]) for language in (r[0][0] for r in results)]
+                ]) for language in (wi.stt_sess.lang for wi in wis)]
             results = self.model.generate(features, prompt)
             print(f'{results=}')
             for r in results: print(self.processor.decode(r.sequences_ids[0]))

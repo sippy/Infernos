@@ -3,6 +3,7 @@ from uuid import uuid4, UUID
 class STTSession():
     debug = True
     id: UUID
+    lang: str = 'ru'
 
     def __init__(self, stt):
         super().__init__()
