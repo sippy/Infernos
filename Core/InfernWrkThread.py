@@ -31,7 +31,7 @@ RTPWrkTStop = 2
 
 class InfernWrkThread(Thread):
     state_lock: Lock = None
-    state = RTPWrkTInit
+    state: int = RTPWrkTInit
 
     def __init__(self):
         self.state_lock = Lock()

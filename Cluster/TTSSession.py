@@ -55,7 +55,6 @@ class TTSSession(InfernWrkThread):
         self.id = uuid4()
         self.tts = tts
         self.sess_term = sess_term
-        self.setDaemon(True)
 
     def start(self, tts_actr, rtp_actr, text, target):
         self.state_lock.acquire()
