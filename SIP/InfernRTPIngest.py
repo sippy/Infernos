@@ -59,7 +59,7 @@ class InfernRTPIngest(InfernWrkThread):
                     self.dprint(f"InfernRTPIngest.run: {len(pkt.rtp_data)=}, {type(pkt.rtp_data)=}")
                 out = self.vad.ingest(pkt.rtp_data)
                 if out is None: continue
-                chunk = self.codec.decode(out.chunk, resample=False)
+                chunk = self.codec.decode(out.chunk, resample=True)
                 self.dprint(f"InfernRTPIngest.run: active chunk: {len(chunk)=}")
                 self.chunk_in(chunk.numpy())
             if npkts < 10 and len(res) > 0:
