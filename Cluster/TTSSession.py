@@ -59,6 +59,7 @@ class TTSSession(InfernWrkThread):
     worker: RemoteRTPGenFromId
     eos_m: TTSSMarkerNewSentCB
     next_sentence_q: Queue[TTSRequest]
+    autoplay = True
 
     def __init__(self, tts, sess_term):
         super().__init__()
@@ -107,11 +108,16 @@ class TTSSession(InfernWrkThread):
         del self.worker
 
     def next_sentence(self):
+        if not self.autoplay: return
         print(f'{monotonic():4.3f}: TTSSession.next_sentence')
         speaker = self.tts.get_rand_voice()
         sent = self.text.pop(0)
         final = (len(self.text) == 0)
         self.next_sentence_q.put(TTSRequest(sent, speaker, final))
+
+    def stopintro(self):
+        print(f'{monotonic():4.3f}: TTSSession.stopintro')
+        self.autoplay = False
 
     def stop(self):
         self.next_sentence_q.put(None)

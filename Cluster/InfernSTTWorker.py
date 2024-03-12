@@ -79,6 +79,7 @@ class InfernSTTWorker(InfernWrkThread):
             for wi, r in good_results:
                 if r.strip() == "Let's talk.":
                     print('BINGO', wi)
+                    self.tts_actr.tts_session_stopintro.remote(wi.tts_sess_id)
             #with torch.no_grad():
             #    audio = wi.audio.to(self.device)
             #    res = wi.stt_sess.model(audio)
