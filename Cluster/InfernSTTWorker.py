@@ -76,7 +76,7 @@ class InfernSTTWorker(InfernWrkThread):
             print(f'{results=}')
             good_results = [(wis[i], self.processor.decode(r.sequences_ids[0])) for i, r in enumerate(results) if r.no_speech_prob <= 0.3]
             for r in good_results: print(r[1])
-            for r, wi in good_results:
+            for wi, r in good_results:
                 if r.strip() == "Let's talk.":
                     print('BINGO', wi)
             #with torch.no_grad():
