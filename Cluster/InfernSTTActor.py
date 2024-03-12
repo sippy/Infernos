@@ -13,14 +13,15 @@ class InfernSTTActor():
     debug = True
     sessions: dict
     stt: InfernSTTWorker
+    tts_actr: ray.actor
 
     def __init__(self):
         super().__init__()
         self.sessions = {}
         #self.stt = STT()
 
-    def start(self):
-        self.stt = InfernSTTWorker('cuda')
+    def start(self, tts_actr):
+        self.stt = InfernSTTWorker(tts_actr, 'cuda')
         self.stt.start()
 
     def stop(self):

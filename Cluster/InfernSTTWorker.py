@@ -21,7 +21,7 @@ class InfernSTTWorker(InfernWrkThread):
     device: str
     inf_queue: Queue[Optional[STTWI]]
     sample_rate: int = 16000
-    def __init__(self, device: str):
+    def __init__(self, tts_actr, device: str):
         super().__init__()
         self.model = ctranslate2.models.Whisper("whisper-large-v3.ct2", device=device, compute_type="int8")
         self.processor = transformers.WhisperProcessor.from_pretrained("openai/whisper-large-v3")
