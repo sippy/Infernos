@@ -91,8 +91,8 @@ class InfernTTSUAS(UA):
     def __init__(self, sippy_c, tts_actr, stt_actr, rtp_actr, req, sip_t):
         self.id = uuid4()
         self.rtp_actr = rtp_actr
-        self.stt_sess_id = ray.get(stt_actr.new_stt_session.remote())
         self._tsess = RemoteTTSSession(tts_actr, self.id)
+        self.stt_sess_id = stt_actr.new_stt_session.remote(self._tsess.sess_id)
         super().__init__(sippy_c, self.outEvent)
         assert sip_t.noack_cb is None
         sip_t.noack_cb = self.sess_term
@@ -122,7 +122,7 @@ class InfernTTSUAS(UA):
         body = model_body.getCopy()
         sect = body.content.sections[0]
         try:
-            rsess = RemoteRTPGen(self.rtp_actr, self.stt_sess_id, rtp_target)
+            rsess = RemoteRTPGen(self.rtp_actr, ray.get(self.stt_sess_id), rtp_target)
             self._tsess.start(self.getPrompts(), rsess.sess_id)
             rtp_laddress = rsess.rtp_address
         except RTPGenError as e:

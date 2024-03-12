@@ -1,5 +1,6 @@
 from typing import Optional
 from queue import Queue, Empty as QueueEmpty
+from uuid import UUID
 
 import torch
 import ctranslate2
@@ -12,7 +13,7 @@ from Cluster.STTSession import STTSession
 class STTWI():
     stt_sess: STTSession
     audio: torch.Tensor
-    res_queue: Queue
+    tts_sess_id: UUID
 
 class InfernSTTWorker(InfernWrkThread):
     max_batch_size: int = 4
@@ -27,10 +28,11 @@ class InfernSTTWorker(InfernWrkThread):
         self.processor = transformers.WhisperProcessor.from_pretrained("openai/whisper-large-v3")
         self.inf_queue = Queue()
         self.device = device
+        self.tts_actr = tts_actr
 
-    def infer(self, stt_sess, audio, res_queue):
+    def infer(self, stt_sess, audio, tts_sess_id: UUID):
         wi = STTWI()
-        wi.stt_sess, wi.audio, wi.res_queue = stt_sess, audio, res_queue
+        wi.stt_sess, wi.audio, wi.tts_sess_id = stt_sess, audio, tts_sess_id
         self.inf_queue.put(wi)
 
     idx: int = 0
@@ -72,10 +74,11 @@ class InfernSTTWorker(InfernWrkThread):
                 ]) for language in (wi.stt_sess.lang for wi in wis)]
             results = self.model.generate(features, prompt, return_no_speech_prob=True)
             print(f'{results=}')
-            good_results = [self.processor.decode(r.sequences_ids[0]) for r in results if r.no_speech_prob <= 0.3]
-            for r in good_results: print(r)
-            if any(r.strip() == "Let's talk." for r in good_results):
-                print('BINGO')
+            good_results = [(wis[i], self.processor.decode(r.sequences_ids[0])) for i, r in enumerate(results) if r.no_speech_prob <= 0.3]
+            for r in good_results: print(r[1])
+            for r, wi in good_results:
+                if r.strip() == "Let's talk.":
+                    print('BINGO', wi)
             #with torch.no_grad():
             #    audio = wi.audio.to(self.device)
             #    res = wi.stt_sess.model(audio)
