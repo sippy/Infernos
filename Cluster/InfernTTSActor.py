@@ -1,6 +1,9 @@
 try: import intel_extension_for_pytorch as ipex
 except ModuleNotFoundError: ipex = None
 
+from typing import Dict
+from uuid import UUID
+
 import ray
 
 from Cluster.TTSSession import TTSSession
@@ -8,7 +11,7 @@ from Cluster.InfernTTSWorker import InfernTTSWorker
 
 @ray.remote
 class InfernTTSActor():
-    sessions: dict
+    sessions: Dict[UUID, TTSSession]
     tts: InfernTTSWorker
 
     def __init__(self, rtp_actr, sip_actr):
@@ -20,7 +23,7 @@ class InfernTTSActor():
         self.tts_actr = ray.get_runtime_context().current_actor
 
     def new_tts_session(self, sip_sess_id):
-        rgen = TTSSession(self.tts, lambda: self.sess_term(sip_sess_id))
+        rgen = TTSSession(self.tts, lambda: self.sip_actr.sess_term.remote(sip_sess_id))
         self.sessions[rgen.id] = rgen
         return rgen.id
 
@@ -37,7 +40,3 @@ class InfernTTSActor():
         rgen = self.sessions[rgen_id]
         rgen.stop()
         del self.sessions[rgen_id]
-
-    def sess_term(self, sip_sess_id):
-        print('sess_term')
-        self.sip_actr.sess_term.remote(sip_sess_id)
