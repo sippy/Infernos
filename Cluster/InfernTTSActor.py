@@ -40,6 +40,10 @@ class InfernTTSActor():
         rgen = self.sessions[rgen_id]
         rgen.stopintro()
 
+    def tts_session_say(self, rgen_id, text):
+        rgen = self.sessions[rgen_id]
+        rgen.say(text)
+
     def end_tts_session(self, rgen_id):
         rgen = self.sessions[rgen_id]
         rgen.stop()
