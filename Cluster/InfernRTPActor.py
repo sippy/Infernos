@@ -20,10 +20,10 @@ class InfernRTPEPoint():
     id: UUID
     dl_file = None
     firstframe = True
-    def __init__(self, rtp_target, stt_actr):
+    def __init__(self, rtp_target, stt_actr, stt_sess_id):
         self.id = uuid4()
         self.rtp_target = rtp_target
-        self.stt_sess_id = ray.get(stt_actr.new_stt_session.remote())
+        self.stt_sess_id = stt_sess_id
         self.stt_actr = stt_actr
         for dev in self.devs:
             try:
@@ -83,9 +83,9 @@ class InfernRTPActor():
     def stdtss(self):
         return f'{monotonic():4.3f}'
 
-    def new_rtp_session(self, rtp_target):
+    def new_rtp_session(self, rtp_target, stt_sess_id):
         print(f'{self.stdtss()}: new_rtp_session')
-        rep = InfernRTPEPoint(rtp_target, self.stt_actr)
+        rep = InfernRTPEPoint(rtp_target, self.stt_actr, stt_sess_id)
         self.sessions[rep.id] = rep
         return (rep.id, rep.rserv.uopts.laddress)
 

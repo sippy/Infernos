@@ -27,14 +27,18 @@ class InfernTTSActor():
         self.sessions[rgen.id] = rgen
         return rgen.id
 
-    def start_tts_session(self, rgen_id, text, target):
+    def start_tts_session(self, rgen_id, rtp_sess_id, text):
         rgen = self.sessions[rgen_id]
-        rtp_address = rgen.start(self.tts_actr, self.rtp_actr, text, target)
+        rtp_address = rgen.start(self.tts_actr, self.rtp_actr, rtp_sess_id, text)
         return rtp_address
 
     def tts_session_next_sentence(self, rgen_id):
         rgen = self.sessions[rgen_id]
         rgen.next_sentence()
+
+    def tts_session_stopintro(self, rgen_id):
+        rgen = self.sessions[rgen_id]
+        rgen.stopintro()
 
     def end_tts_session(self, rgen_id):
         rgen = self.sessions[rgen_id]
