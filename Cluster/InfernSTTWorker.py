@@ -1,6 +1,8 @@
 from typing import Optional
 from queue import Queue, Empty as QueueEmpty
 from uuid import UUID
+from os.path import expanduser, exists as path_exists
+from subprocess import Popen, PIPE
 
 import torch
 import ctranslate2
@@ -20,12 +22,21 @@ class InfernSTTWorker(InfernWrkThread):
     model: ctranslate2.models.Whisper
     processor: transformers.WhisperProcessor
     device: str
+    cache_dir: str = '~/.cache/Infernos'
     inf_queue: Queue[Optional[STTWI]]
     sample_rate: int = 16000
-    def __init__(self, tts_actr, device: str):
+    def __init__(self, tts_actr, device: str, model_name: str = "openai/whisper-large-v3"):
         super().__init__()
-        self.model = ctranslate2.models.Whisper("whisper-large-v3.ct2", device=device, compute_type="int8")
-        self.processor = transformers.WhisperProcessor.from_pretrained("openai/whisper-large-v3")
+        cache_dir = expanduser(f'{self.cache_dir}/{model_name}.ct2')
+        if not any((path_exists(f'{cache_dir}/{_c}') for _c in ('model.bin', 'config.json', 'vocabulary.json'))):
+            print(f'Converting "{model_name}" to "{cache_dir}"...')
+            command = ['ct2-transformers-converter', '--model', model_name, '--output_dir', cache_dir]
+            process = Popen(command, stdout=PIPE, stderr=PIPE)
+            stdout, stderr = process.communicate()
+            if process.returncode != 0:
+                raise RuntimeError(f'{command[0]} failed with {process.returncode=}, {stdout=}, {stderr=}')
+        self.model = ctranslate2.models.Whisper(cache_dir, device=device, compute_type="int8")
+        self.processor = transformers.WhisperProcessor.from_pretrained(model_name)
         self.inf_queue = Queue()
         self.device = device
         self.tts_actr = tts_actr
