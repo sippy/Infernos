@@ -2,6 +2,7 @@ from typing import Optional
 from queue import Queue, Empty as QueueEmpty
 
 from rtpsynth.RtpJBuf import RtpJBuf, RTPFrameType, RTPParseError
+from sippy.Core.EventDispatcher import ED2
 
 from Core.InfernWrkThread import InfernWrkThread, RTPWrkTRun
 from Core.VAD.ZlibVAD import ZlibVAD
@@ -61,7 +62,7 @@ class InfernRTPIngest(InfernWrkThread):
                 if out is None: continue
                 chunk = self.codec.decode(out.chunk, resample=True)
                 self.dprint(f"InfernRTPIngest.run: active chunk: {len(chunk)=}")
-                self.chunk_in(chunk.numpy())
+                ED2.callFromThread(self.chunk_in, chunk.numpy())
             if npkts < 10 and len(res) > 0:
                 self.dprint(f"InfernRTPIngest.run: res = {res}")
         if data is not None:
