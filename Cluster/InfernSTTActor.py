@@ -6,8 +6,6 @@ import ray
 from Cluster.InfernSTTWorker import InfernSTTWorker
 from Cluster.STTSession import STTSession
 
-#from STT import STT
-
 @ray.remote(num_gpus=1, resources={"stt": 1})
 class InfernSTTActor():
     debug = True
@@ -18,7 +16,6 @@ class InfernSTTActor():
     def __init__(self):
         super().__init__()
         self.sessions = {}
-        #self.stt = STT()
 
     def start(self, tts_actr):
         self.stt = InfernSTTWorker(tts_actr, 'cuda')
