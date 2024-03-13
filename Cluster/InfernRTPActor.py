@@ -59,7 +59,7 @@ class InfernRTPEPoint():
 
     def chunk_in(self, chunk):
         if self.debug:
-            print('InfernRTPEPoint.chunk_in {self.stt_actr.stt_session_soundin=} {self.stt_actr.stt_session_soundin.remote=} {self.stt_sess_id=}')
+            print(f'InfernRTPEPoint.chunk_in {self.stt_actr.stt_session_soundin=} {self.stt_actr.stt_session_soundin.remote=} {self.stt_sess_id=}')
         self.stt_actr.stt_session_soundin.remote(self.stt_sess_id, chunk)
 
     def soundout(self, chunk, stdtss):
