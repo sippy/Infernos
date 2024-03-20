@@ -120,7 +120,7 @@ class TTSSession(InfernWrkThread):
         self.autoplay = False
 
     def say(self, text):
-        assert not self.autoplay
+        if self.autoplay: return
         print(f'{monotonic():4.3f}: TTSSession.say')
         speaker = self.tts.get_rand_voice()
         self.next_sentence_q.put(TTSRequest(text, speaker))
