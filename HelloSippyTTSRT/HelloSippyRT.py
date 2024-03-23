@@ -242,11 +242,11 @@ class HelloSippyRT():
     vocoder: SpeechT5HifiGan
     model: SpeechT5ForTextToSpeech
     cuda_lock = InfernGlobals().torcher
-    def __init__(self, device):
+    def __init__(self, device, model="microsoft/speecht5_tts"):
         with self.cuda_lock:
-            self.processor = SpeechT5Processor.from_pretrained("microsoft/speecht5_tts")
+            self.processor = SpeechT5Processor.from_pretrained(model)
             mc = SpeechT5Config(max_speech_positions=4000)
-            model = SpeechT5ForTextToSpeech.from_pretrained("microsoft/speecht5_tts",
+            model = SpeechT5ForTextToSpeech.from_pretrained(model,
                                                             config=mc).to(device)
             model.eval()
             self.model = model

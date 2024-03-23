@@ -7,12 +7,17 @@ from HelloSippyTTSRT.HelloSippyRT import HelloSippyRT
 
 from TTSRTPOutput import TTSRTPOutput, TTSSMarkerEnd
 
+lang2model = {'en': {},
+              'it': {'model':"Sandiago21/speecht5_finetuned_voxpopuli_it"},
+              'de': {'model':"JFuellem/speecht5_finetuned_voxpopuli_de"},
+             }
+
 class InfernTTSWorker(HelloSippyRT):
     device = 'cuda' if ipex is None else 'xpu'
     debug = False
 
-    def __init__(self):
-        super().__init__(self.device)
+    def __init__(self, lang='en'):
+        super().__init__(self.device, **lang2model[lang])
         if ipex is not None:
             self.model = ipex.optimize(self.model)
             self.vocoder = ipex.optimize(self.vocoder)
