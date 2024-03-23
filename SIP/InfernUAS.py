@@ -28,7 +28,7 @@ from uuid import uuid4, UUID
 import ray
 
 from sippy.UA import UA
-from sippy.CCEvents import CCEventTry, CCEventConnect, CCEventFail
+from sippy.CCEvents import CCEventTry, CCEventConnect, CCEventFail, CCEventUpdate
 from sippy.MsgBody import MsgBody
 from sippy.SdpOrigin import SdpOrigin
 from sippy.SipConf import SipConf
@@ -86,6 +86,8 @@ class InfernUASFailure(CCEventFail):
 class InfernTTSUAS(UA):
     debug = True
     id: UUID
+    rsess: RemoteRTPGen
+    our_sdp_body: MsgBody
     _tsess: RemoteTTSSession = None
 
     def __init__(self, sippy_c, tts_actr, stt_actr, rtp_actr, req, sip_t):
@@ -101,13 +103,10 @@ class InfernTTSUAS(UA):
     def getPrompts(self):
         return [f'{human_readable_time()}',] + prompts
 
-    def outEvent(self, event, ua):
-        if not isinstance(event, CCEventTry):
-            #ua.disconnect()
-            return
-        cId, cli, cld, sdp_body, auth, caller_name = event.getData()
+    def extract_rtp_target(self, sdp_body):
         if sdp_body == None:
-            ua.disconnect()
+            event = InfernUASFailure("later offer/answer is not supported at this time, sorry")
+            self.recvEvent(event)
             return
         sdp_body.parse()
         sects = [s for s in sdp_body.content.sections
@@ -116,23 +115,41 @@ class InfernTTSUAS(UA):
         if len(sects) == 0:
             event = InfernUASFailure("only G.711u audio is supported at this time, sorry")
             self.recvEvent(event)
-            return
+            return None
         sect = sects[0]
-        rtp_target = (sect.c_header.addr, sect.m_header.port)
-        body = model_body.getCopy()
-        sect = body.content.sections[0]
+        return (sect.c_header.addr, sect.m_header.port)
+
+    def outEvent(self, event, ua):
+        if isinstance(event, CCEventUpdate):
+            sdp_body = event.getData()
+            rtp_target = self.extract_rtp_target(sdp_body)
+            if rtp_target is None: return
+            self.rsess.update(rtp_target)
+            self.send_uas_resp()
+            return
+        if not isinstance(event, CCEventTry):
+            #ua.disconnect()
+            return
+        cId, cli, cld, sdp_body, auth, caller_name = event.getData()
+        rtp_target = self.extract_rtp_target(sdp_body)
+        if rtp_target is None: return
         try:
-            rsess = RemoteRTPGen(self.rtp_actr, ray.get(self.stt_sess_id), rtp_target)
-            self._tsess.start(self.getPrompts(), rsess.sess_id)
-            rtp_laddress = rsess.rtp_address
+            self.rsess = RemoteRTPGen(self.rtp_actr, ray.get(self.stt_sess_id), rtp_target)
+            self._tsess.start(self.getPrompts(), self.rsess.sess_id)
         except RTPGenError as e:
             event = InfernUASFailure(code=500, reason=str(e))
             self.recvEvent(event)
             raise e
-        sect.c_header.addr, sect.m_header.port = rtp_laddress
-        body.content.o_header = SdpOrigin()
-        oevent = CCEventConnect((200, 'OK', body))
         self.disc_cbs = (self.sess_term,)
+        body = model_body.getCopy()
+        sect = body.content.sections[0]
+        sect.c_header.addr, sect.m_header.port = self.rsess.rtp_address
+        self.our_sdp_body = body
+        self.send_uas_resp()
+
+    def send_uas_resp(self):
+        self.our_sdp_body.content.o_header = SdpOrigin()
+        oevent = CCEventConnect((200, 'OK', self.our_sdp_body.getCopy()))
         return self.recvEvent(oevent)
 
     def sess_term(self, ua=None, rtime=None, origin=None, result=0):
