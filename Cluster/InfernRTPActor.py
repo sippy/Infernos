@@ -1,8 +1,10 @@
 try: import intel_extension_for_pytorch as ipex
 except ModuleNotFoundError: ipex = None
 
+from typing import Tuple, Dict
 from uuid import uuid4, UUID
 from time import monotonic
+from threading import Lock
 from _thread import get_ident
 
 from ray import ray
@@ -20,9 +22,13 @@ class InfernRTPEPoint():
     id: UUID
     dl_file = None
     firstframe = True
-    def __init__(self, rtp_target, stt_actr, stt_sess_id):
+    rtp_target: Tuple[str, int]
+    rtp_target_lock: Lock
+    def __init__(self, rtp_target:Tuple[str, int], stt_actr, stt_sess_id):
         self.id = uuid4()
+        assert isinstance(rtp_target, tuple) and len(rtp_target) == 2
         self.rtp_target = rtp_target
+        self.rtp_target_lock = Lock()
         self.stt_sess_id = stt_sess_id
         self.stt_actr = stt_actr
         for dev in self.devs:
@@ -33,7 +39,7 @@ class InfernRTPEPoint():
                 if dev == self.devs[-1]: raise
             else: break
         rtp_laddr = local4remote(rtp_target[0])
-        rserv_opts = Udp_server_opts((rtp_laddr, 0), self.ring.rtp_received)
+        rserv_opts = Udp_server_opts((rtp_laddr, 0), self.rtp_received)
         rserv_opts.nworkers = 1
         self.rserv = Udp_server({}, rserv_opts)
         self.writer.set_pkt_send_f(self.send_pkt)
@@ -43,7 +49,23 @@ class InfernRTPEPoint():
         self.writer.start()
 
     def send_pkt(self, pkt):
-        self.rserv.send_to(pkt, self.rtp_target)
+        with self.rtp_target_lock:
+            rtp_target = self.rtp_target
+        self.rserv.send_to(pkt, rtp_target)
+
+    def rtp_received(self, data, address, udp_server, rtime):
+        #self.dprint(f"InfernRTPIngest.rtp_received: len(data) = {len(data)}")
+        with self.rtp_target_lock:
+            if address != self.rtp_target:
+                self.dprint(f"InfernRTPIngest.rtp_received: address mismatch {address=} {self.rtp_target=}")
+                return
+        self.ring.rtp_received(data, address, rtime)
+
+    def update(self, rtp_target:Tuple[str, int]):
+        assert isinstance(rtp_target, tuple) and len(rtp_target) == 2
+        with self.rtp_target_lock:
+            self.rtp_target = rtp_target
+        self.ring.stream_update()
 
     def shutdown(self):
         self.writer.join()
@@ -65,7 +87,7 @@ class InfernRTPEPoint():
     def soundout(self, chunk, stdtss):
         ismark = isinstance(chunk, TTSSMarkerGeneric)
         if self.firstframe or ismark:
-            print(f'{stdtss()}: soundout_rtp_session: {"mark" if ismark else "data"}')
+            print(f'{stdtss()}: rtp_session_soundout: {"mark" if ismark else "data"}')
             self.firstframe = False
         if ismark and isinstance(chunk, TTSSMarkerNewSent):
             self.firstframe = True
@@ -75,7 +97,7 @@ class InfernRTPEPoint():
 
 @ray.remote(resources={"rtp": 1})
 class InfernRTPActor():
-    sessions: dict
+    sessions: Dict[UUID, InfernRTPEPoint]
     def __init__(self, stt_actr):
         self.sessions = {}
         self.stt_actr = stt_actr
@@ -89,20 +111,25 @@ class InfernRTPActor():
         self.sessions[rep.id] = rep
         return (rep.id, rep.rserv.uopts.laddress)
 
-    def end_rtp_session(self, rtp_id):
-        print(f'{self.stdtss()}: end_rtp_session')
+    def rtp_session_end(self, rtp_id):
+        print(f'{self.stdtss()}: rtp_session_end')
         rep = self.sessions[rtp_id]
         rep.writer.end()
 
-    def soundout_rtp_session(self, rtp_id, chunk):
+    def rtp_session_soundout(self, rtp_id, chunk):
         rep = self.sessions[rtp_id]
         return rep.soundout(chunk, self.stdtss)
 
-    def join_rtp_session(self, rtp_id):
-        print(f'{self.stdtss()}: join_rtp_session')
+    def rtp_session_join(self, rtp_id):
+        print(f'{self.stdtss()}: rtp_session_join')
         rep = self.sessions[rtp_id]
         rep.shutdown()
         del self.sessions[rtp_id]
+
+    def rtp_session_update(self, rtp_id, rtp_target):
+        print(f'{self.stdtss()}: rtp_session_update')
+        rep = self.sessions[rtp_id]
+        rep.update(rtp_target)
 
     def loop(self):
         from sippy.Core.EventDispatcher import ED2

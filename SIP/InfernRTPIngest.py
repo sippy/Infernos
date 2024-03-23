@@ -7,6 +7,15 @@ from Core.InfernWrkThread import InfernWrkThread, RTPWrkTRun
 from Core.VAD.ZlibVAD import ZlibVAD
 from Core.Codecs.G711 import G711Codec
 
+
+class WIPkt:
+    def __init__(self, data, address, rtime):
+        self.data = data
+        self.address = address
+        self.rtime = rtime
+
+class WIStreamUpdate: pass
+
 class InfernRTPIngest(InfernWrkThread):
     debug = True
     pkt_queue: Queue = None
@@ -37,10 +46,14 @@ class InfernRTPIngest(InfernWrkThread):
         npkts = 0
         jbuf = RtpJBuf(self.jb_size)
         while self.get_state() == RTPWrkTRun:
-            try:
-                data, address, rtime = self.pkt_queue.get(timeout=0.03)
-            except QueueEmpty:
+            wi = self.pkt_queue.get()
+            if wi is None: break
+            if isinstance(wi, WIStreamUpdate):
+                print("InfernRTPIngest.run: stream update")
+                jbuf = RtpJBuf(self.jb_size)
+                self.last_output_lseq = None
                 continue
+            data, address, rtime = wi.data, wi.address, wi.rtime
             try:
                 res = jbuf.udp_in(data)
             except RTPParseError as e:
@@ -50,6 +63,7 @@ class InfernRTPIngest(InfernWrkThread):
             if npkts == 1:
                 self.dprint(f"InfernRTPIngest.run: address={address}, rtime={rtime}, len(data) = {len(data)} data={data[:40]}")
             for pkt in res:
+                if pkt.content.type == RTPFrameType.ERS: print(f"InfernRTPIngest.run: ERS packet received {pkt.content.lseq_start=}, {pkt.content.lseq_end=}")
                 assert pkt.content.type != RTPFrameType.ERS
                 if npkts < 10:
                     self.dprint(f"InfernRTPIngest.run: {pkt.content.frame.rtp.lseq=}")
@@ -69,13 +83,17 @@ class InfernRTPIngest(InfernWrkThread):
         self.dprint(f"InfernRTPIngest.run: exiting, total packets received: {npkts}")
 
     def stop(self):
+        self.pkt_queue.put(None)
         super().stop()
         self.dprint("InfernRTPIngest stopped")
         del self.chunk_in
 
-    def rtp_received(self, data, address, udp_server, rtime):
+    def rtp_received(self, data, address, rtime):
         #self.dprint(f"InfernRTPIngest.rtp_received: len(data) = {len(data)}")
-        self.pkt_queue.put((data, address, rtime))
+        self.pkt_queue.put(WIPkt(data, address, rtime))
+
+    def stream_update(self):
+        self.pkt_queue.put(WIStreamUpdate())
 
     def __del__(self):
         self.dprint("InfernRTPIngest.__del__")
