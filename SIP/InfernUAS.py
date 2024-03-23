@@ -98,7 +98,7 @@ class InfernTTSUAS(UA):
 
     def extract_rtp_target(self, sdp_body):
         if sdp_body == None:
-            event = InfernUASFailure("later offer/answer is not supported at this time, sorry")
+            event = InfernUASFailure("late offer/answer is not supported at this time, sorry")
             self.recvEvent(event)
             return
         sdp_body.parse()
