@@ -38,9 +38,6 @@ from sippy.SipReason import SipReason
 from Cluster.RemoteRTPGen import RemoteRTPGen, RTPGenError
 from Cluster.RemoteTTSSession import RemoteTTSSession, TTSSessionError
 
-from utils.tts import human_readable_time, hal_set, smith_set, \
-        bender_set
-
 ULAW_PT = 0
 ULAW_RM = 'PCMU/8000'
 body_txt = 'v=0\r\n' + \
@@ -70,9 +67,6 @@ class InfernUASConf(object):
         self.laddr = SipConf.my_address
         self.lport = SipConf.my_port
 
-prompts = ['Welcome to Infernos.'] + bender_set(2) + \
-        smith_set() + hal_set() #+ t900_set() 
-
 class InfernUASFailure(CCEventFail):
     default_code = 488
     _code_msg = {default_code : 'Not Acceptable Here',
@@ -89,8 +83,9 @@ class InfernTTSUAS(UA):
     rsess: RemoteRTPGen
     our_sdp_body: MsgBody
     _tsess: RemoteTTSSession = None
+    prompts = None
 
-    def __init__(self, sippy_c, tts_actr, stt_actr, rtp_actr, req, sip_t):
+    def __init__(self, sippy_c, tts_actr, stt_actr, rtp_actr, req, sip_t, prompts):
         self.id = uuid4()
         self.rtp_actr = rtp_actr
         self._tsess = RemoteTTSSession(tts_actr, self.id)
@@ -98,10 +93,8 @@ class InfernTTSUAS(UA):
         super().__init__(sippy_c, self.outEvent)
         assert sip_t.noack_cb is None
         sip_t.noack_cb = self.sess_term
+        self.prompts = prompts
         self.recvRequest(req, sip_t)
-
-    def getPrompts(self):
-        return [f'{human_readable_time()}',] + prompts
 
     def extract_rtp_target(self, sdp_body):
         if sdp_body == None:
@@ -135,7 +128,7 @@ class InfernTTSUAS(UA):
         if rtp_target is None: return
         try:
             self.rsess = RemoteRTPGen(self.rtp_actr, ray.get(self.stt_sess_id), rtp_target)
-            self._tsess.start(self.getPrompts(), self.rsess.sess_id)
+            self._tsess.start(self.prompts, self.rsess.sess_id)
         except RTPGenError as e:
             event = InfernUASFailure(code=500, reason=str(e))
             self.recvEvent(event)

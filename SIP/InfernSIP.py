@@ -33,6 +33,9 @@ from sippy.misc import local4remote
 
 from .InfernUAS import InfernTTSUAS
 
+from utils.tts import human_readable_time, hal_set, smith_set, \
+        bender_set
+
 def good(*a):
     #ED2.breakLoop(0)
     pass
@@ -74,6 +77,8 @@ class InfernSIP(object):
                 rok_cb=good, rfail_cb=bad)
         ragent.rmsg.getHFBody('to').getUrl().username = iao.cld
         ragent.doregister()
+        self.prompts = ['Welcome to Infernos.'] + bender_set(2) + \
+               smith_set() + hal_set() #+ t900_set()
 
     def recvRequest(self, req, sip_t):
         if req.getMethod() in ('NOTIFY', 'PING'):
@@ -83,10 +88,14 @@ class InfernSIP(object):
             #if self.rserv != None:
             #    return (req.genResponse(486, 'Busy Here'), None, None)
             # New dialog
-            isess = InfernTTSUAS(self.sippy_c, self.tts_actr, self.stt_actr, self.rtp_actr, req, sip_t)
+            isess = InfernTTSUAS(self.sippy_c, self.tts_actr, self.stt_actr, self.rtp_actr,
+                                 req, sip_t, self.getPrompts())
             self.sessions[isess.id] = isess
             return
         return (req.genResponse(501, 'Not Implemented'), None, None)
 
     def get_session(self, sip_sess_id):
         return self.sessions[sip_sess_id]
+
+    def getPrompts(self):
+        return [f'{human_readable_time()}',] + self.prompts
