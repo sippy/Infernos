@@ -79,7 +79,7 @@ class InfernUASFailure(CCEventFail):
                                 reason=reason)
 
 class CCEventSentDone: pass
-class CCEventStopAutoplay: pass
+class CCEventSTTTextIn: pass
 
 class InfernTTSUAS(UA):
     debug = True
@@ -94,7 +94,7 @@ class InfernTTSUAS(UA):
         self.id = uuid4()
         self.sip_actr, self.rtp_actr = sip_actr, rtp_actr
         self._tsess = RemoteTTSSession(tts_actr)
-        activate_cb = partial(sip_actr.sess_event.remote, self.id, CCEventStopAutoplay())
+        activate_cb = partial(sip_actr.sess_event.remote, sip_sess_id=self.id, event=CCEventSTTTextIn())
         self.stt_sess_id = stt_actr.new_stt_session.remote(self._tsess.sess_id, activate_cb)
         super().__init__(sippy_c, self.outEvent)
         assert sip_t.noack_cb is None
@@ -148,8 +148,13 @@ class InfernTTSUAS(UA):
         self.recvEvent(CCEventSentDone())
 
     def recvEvent(self, event):
-        if isinstance(event, CCEventStopAutoplay):
-            self.autoplay = False
+        if isinstance(event, CCEventSTTTextIn):
+            r = event.kwargs['text']
+            if r.strip() == "Let's talk.":
+                self.autoplay = False
+            if self.autoplay:
+                return
+            self._tsess.say(r)
             return
         if isinstance(event, CCEventSentDone):
             if not self.autoplay:
@@ -157,7 +162,7 @@ class InfernTTSUAS(UA):
             if len(self.prompts) == 0:
                 self.sess_term()
                 return
-            next_sentence_cb = partial(self.sip_actr.sess_event.remote, self.id, event)
+            next_sentence_cb = partial(self.sip_actr.sess_event.remote, sip_sess_id=self.id, event=event)
             self._tsess.say(self.prompts.pop(0), next_sentence_cb)
             return
         super().recvEvent(event)

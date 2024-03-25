@@ -33,9 +33,10 @@ class InfernSIPActor():
         sip_sess = self.sip_stack.get_session(sip_sess_id)
         ED2.callFromThread(sip_sess.sess_term)
 
-    def sess_event(self, sip_sess_id, event):
+    def sess_event(self, sip_sess_id, event, **kwargs):
         from sippy.Core.EventDispatcher import ED2
         sip_sess = self.sip_stack.get_session(sip_sess_id)
+        event.kwargs = kwargs
         ED2.callFromThread(sip_sess.recvEvent, event)
 
     def stop(self):

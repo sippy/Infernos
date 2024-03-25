@@ -86,13 +86,11 @@ class InfernSTTWorker(InfernWrkThread):
                 ]) for language in (wi.stt_sess.lang for wi in wis)]
             results = self.model.generate(features, prompt, return_no_speech_prob=True)
             print(f'{results=}')
-            good_results = [(wis[i], self.processor.decode(r.sequences_ids[0])) for i, r in enumerate(results) if r.no_speech_prob <= 0.3]
+            good_results = [(wis[i], self.processor.decode(r.sequences_ids[0]), r.no_speech_prob)
+                             for i, r in enumerate(results) if r.no_speech_prob <= 0.3]
             for r in good_results: print(r[1])
-            for wi, r in good_results:
-                if r.strip() == "Let's talk.":
-                    print('BINGO', wi)
-                    wi.activate_cb()
-                self.tts_actr.tts_session_say.remote(wi.tts_sess_id, r)
+            for wi, r, nsp in good_results:
+                wi.activate_cb(text=r, no_speech_prob=nsp)
             #with torch.no_grad():
             #    audio = wi.audio.to(self.device)
             #    res = wi.stt_sess.model(audio)
