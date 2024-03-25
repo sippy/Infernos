@@ -24,6 +24,7 @@
 # SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 from uuid import uuid4, UUID
+from functools import partial
 
 import ray
 
@@ -77,6 +78,9 @@ class InfernUASFailure(CCEventFail):
         self.reason = SipReason(protocol='SIP', cause=self.code,
                                 reason=reason)
 
+class CCEventSentDone: pass
+class CCEventStopAutoplay: pass
+
 class InfernTTSUAS(UA):
     debug = True
     id: UUID
@@ -84,12 +88,14 @@ class InfernTTSUAS(UA):
     our_sdp_body: MsgBody
     _tsess: RemoteTTSSession = None
     prompts = None
+    autoplay = True
 
-    def __init__(self, sippy_c, tts_actr, stt_actr, rtp_actr, req, sip_t, prompts):
+    def __init__(self, sippy_c, sip_actr, tts_actr, stt_actr, rtp_actr, req, sip_t, prompts):
         self.id = uuid4()
-        self.rtp_actr = rtp_actr
+        self.sip_actr, self.rtp_actr = sip_actr, rtp_actr
         self._tsess = RemoteTTSSession(tts_actr, self.id)
-        self.stt_sess_id = stt_actr.new_stt_session.remote(self._tsess.sess_id)
+        activate_cb = partial(sip_actr.sess_event.remote, self.id, CCEventStopAutoplay())
+        self.stt_sess_id = stt_actr.new_stt_session.remote(self._tsess.sess_id, activate_cb)
         super().__init__(sippy_c, self.outEvent)
         assert sip_t.noack_cb is None
         sip_t.noack_cb = self.sess_term
@@ -128,7 +134,7 @@ class InfernTTSUAS(UA):
         if rtp_target is None: return
         try:
             self.rsess = RemoteRTPGen(self.rtp_actr, ray.get(self.stt_sess_id), rtp_target)
-            self._tsess.start(self.prompts, self.rsess.sess_id)
+            self._tsess.start(self.rsess.sess_id)
         except RTPGenError as e:
             event = InfernUASFailure(code=500, reason=str(e))
             self.recvEvent(event)
@@ -139,6 +145,19 @@ class InfernTTSUAS(UA):
         sect.c_header.addr, sect.m_header.port = self.rsess.rtp_address
         self.our_sdp_body = body
         self.send_uas_resp()
+        self.recvEvent(CCEventSentDone())
+
+    def recvEvent(self, event):
+        if isinstance(event, CCEventStopAutoplay):
+            self.autoplay = False
+            return
+        if isinstance(event, CCEventSentDone):
+            if not self.autoplay or len(self.prompts) == 0:
+                return
+            next_sentence_cb = partial(self.sip_actr.sess_event.remote, self.id, event)
+            self._tsess.say(self.prompts.pop(0), next_sentence_cb)
+            return
+        super().recvEvent(event)
 
     def send_uas_resp(self):
         self.our_sdp_body.content.o_header = SdpOrigin()

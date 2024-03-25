@@ -16,6 +16,7 @@ class STTWI():
     stt_sess: STTSession
     audio: torch.Tensor
     tts_sess_id: UUID
+    activate_cb: callable
 
 class InfernSTTWorker(InfernWrkThread):
     max_batch_size: int = 4
@@ -41,9 +42,9 @@ class InfernSTTWorker(InfernWrkThread):
         self.device = device
         self.tts_actr = tts_actr
 
-    def infer(self, stt_sess, audio, tts_sess_id: UUID):
+    def infer(self, stt_sess, audio, tts_sess_id: UUID, activate_cb):
         wi = STTWI()
-        wi.stt_sess, wi.audio, wi.tts_sess_id = stt_sess, audio, tts_sess_id
+        wi.stt_sess, wi.audio, wi.tts_sess_id, wi.activate_cb = stt_sess, audio, tts_sess_id, activate_cb
         self.inf_queue.put(wi)
 
     idx: int = 0
@@ -58,8 +59,8 @@ class InfernSTTWorker(InfernWrkThread):
                 except QueueEmpty: break
             if wi is None:
                 return None
-            sf.write(f'/tmp/wi{self.idx}.wav', wi.audio, samplerate=self.sample_rate)
-            self.idx += 1
+            #sf.write(f'/tmp/wi{self.idx}.wav', wi.audio, samplerate=self.sample_rate)
+            #self.idx += 1
             wis.append(wi)
         return wis
 
@@ -90,7 +91,7 @@ class InfernSTTWorker(InfernWrkThread):
             for wi, r in good_results:
                 if r.strip() == "Let's talk.":
                     print('BINGO', wi)
-                    self.tts_actr.tts_session_stopintro.remote(wi.tts_sess_id)
+                    wi.activate_cb()
                 self.tts_actr.tts_session_say.remote(wi.tts_sess_id, r)
             #with torch.no_grad():
             #    audio = wi.audio.to(self.device)
@@ -100,4 +101,3 @@ class InfernSTTWorker(InfernWrkThread):
     def stop(self):
         self.inf_queue.put(None)
         super().stop()
-
