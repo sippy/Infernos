@@ -1,8 +1,9 @@
 try: import intel_extension_for_pytorch as ipex
 except ModuleNotFoundError: ipex = None
 
-from typing import Dict
+from typing import Dict, Optional
 from uuid import UUID
+from functools import partial
 
 import ray
 
@@ -22,27 +23,19 @@ class InfernTTSActor():
         self.sip_actr = sip_actr
         self.tts_actr = ray.get_runtime_context().current_actor
 
-    def new_tts_session(self, sip_sess_id):
-        rgen = TTSSession(self.tts, lambda: self.sip_actr.sess_term.remote(sip_sess_id))
+    def new_tts_session(self):
+        rgen = TTSSession(self.tts)
         self.sessions[rgen.id] = rgen
         return rgen.id
 
-    def start_tts_session(self, rgen_id, rtp_sess_id, text):
+    def start_tts_session(self, rgen_id, rtp_sess_id):
         rgen = self.sessions[rgen_id]
-        rtp_address = rgen.start(self.tts_actr, self.rtp_actr, rtp_sess_id, text)
+        rtp_address = rgen.start(self.rtp_actr, rtp_sess_id)
         return rtp_address
 
-    def tts_session_next_sentence(self, rgen_id):
+    def tts_session_say(self, rgen_id, text, done_cb:Optional[ray.ObjectRef]=None):
         rgen = self.sessions[rgen_id]
-        rgen.next_sentence()
-
-    def tts_session_stopintro(self, rgen_id):
-        rgen = self.sessions[rgen_id]
-        rgen.stopintro()
-
-    def tts_session_say(self, rgen_id, text):
-        rgen = self.sessions[rgen_id]
-        rgen.say(text)
+        rgen.say(text, done_cb)
 
     def end_tts_session(self, rgen_id):
         rgen = self.sessions[rgen_id]

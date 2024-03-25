@@ -93,7 +93,7 @@ class InfernTTSUAS(UA):
     def __init__(self, sippy_c, sip_actr, tts_actr, stt_actr, rtp_actr, req, sip_t, prompts):
         self.id = uuid4()
         self.sip_actr, self.rtp_actr = sip_actr, rtp_actr
-        self._tsess = RemoteTTSSession(tts_actr, self.id)
+        self._tsess = RemoteTTSSession(tts_actr)
         activate_cb = partial(sip_actr.sess_event.remote, self.id, CCEventStopAutoplay())
         self.stt_sess_id = stt_actr.new_stt_session.remote(self._tsess.sess_id, activate_cb)
         super().__init__(sippy_c, self.outEvent)
@@ -152,7 +152,10 @@ class InfernTTSUAS(UA):
             self.autoplay = False
             return
         if isinstance(event, CCEventSentDone):
-            if not self.autoplay or len(self.prompts) == 0:
+            if not self.autoplay:
+                return
+            if len(self.prompts) == 0:
+                self.sess_term()
                 return
             next_sentence_cb = partial(self.sip_actr.sess_event.remote, self.id, event)
             self._tsess.say(self.prompts.pop(0), next_sentence_cb)
