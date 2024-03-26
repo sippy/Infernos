@@ -1,7 +1,7 @@
 try: import intel_extension_for_pytorch as ipex
 except ModuleNotFoundError: ipex = None
 
-from typing import Tuple, Dict
+from typing import Any, Tuple, Dict
 from uuid import uuid4, UUID
 from time import monotonic
 from threading import Lock
@@ -13,7 +13,8 @@ from sippy.Udp_server import Udp_server, Udp_server_opts
 from sippy.misc import local4remote
 
 from TTSRTPOutput import TTSRTPOutput,  TTSSMarkerGeneric, TTSSMarkerNewSent
-from SIP.InfernRTPIngest import InfernRTPIngest
+from SIP.InfernRTPIngest import InfernRTPIngest, RTPInStream
+
 
 class InfernRTPEPoint():
     debug = True
@@ -24,7 +25,7 @@ class InfernRTPEPoint():
     firstframe = True
     rtp_target: Tuple[str, int]
     rtp_target_lock: Lock
-    def __init__(self, rtp_target:Tuple[str, int], stt_actr, stt_sess_id):
+    def __init__(self, rtp_target:Tuple[str, int], stt_actr, stt_sess_id, ring):
         self.id = uuid4()
         assert isinstance(rtp_target, tuple) and len(rtp_target) == 2
         self.rtp_target = rtp_target
@@ -34,18 +35,18 @@ class InfernRTPEPoint():
         for dev in self.devs:
             try:
                 self.writer = TTSRTPOutput(0, dev)
-                self.ring = InfernRTPIngest(self.chunk_in, dev)
+                self.rsess = RTPInStream(ring, self.chunk_in, dev)
             except RuntimeError:
                 if dev == self.devs[-1]: raise
             else: break
         rtp_laddr = local4remote(rtp_target[0])
         rserv_opts = Udp_server_opts((rtp_laddr, 0), self.rtp_received)
         rserv_opts.nworkers = 1
+        rserv_opts.direct_dispatch = True
         self.rserv = Udp_server({}, rserv_opts)
         self.writer.set_pkt_send_f(self.send_pkt)
         if self.dl_file is not None:
             self.writer.enable_datalog(self.dl_file)
-        self.ring.start()
         self.writer.start()
 
     def send_pkt(self, pkt):
@@ -59,20 +60,18 @@ class InfernRTPEPoint():
             if address != self.rtp_target:
                 self.dprint(f"InfernRTPIngest.rtp_received: address mismatch {address=} {self.rtp_target=}")
                 return
-        self.ring.rtp_received(data, address, rtime)
+        self.rsess.rtp_received(data, address, rtime)
 
     def update(self, rtp_target:Tuple[str, int]):
         assert isinstance(rtp_target, tuple) and len(rtp_target) == 2
         with self.rtp_target_lock:
             self.rtp_target = rtp_target
-        self.ring.stream_update()
+        self.rsess.stream_update()
 
     def shutdown(self):
         self.writer.join()
-        self.ring.stop()
-        self.ring.join()
         self.rserv.shutdown()
-        self.ring, self.rserv, self.writer = (None, None, None)
+        self.rserv, self.writer = (None, None)
         self.stt_actr.end_stt_session.remote(sess_id=self.stt_sess_id)
 
     def __del__(self):
@@ -97,7 +96,9 @@ class InfernRTPEPoint():
 
 @ray.remote(resources={"rtp": 1})
 class InfernRTPActor():
+    device = 'cpu'
     sessions: Dict[UUID, InfernRTPEPoint]
+    ring: InfernRTPIngest
     def __init__(self, stt_actr):
         self.sessions = {}
         self.stt_actr = stt_actr
@@ -107,7 +108,7 @@ class InfernRTPActor():
 
     def new_rtp_session(self, rtp_target, stt_sess_id):
         print(f'{self.stdtss()}: new_rtp_session')
-        rep = InfernRTPEPoint(rtp_target, self.stt_actr, stt_sess_id)
+        rep = InfernRTPEPoint(rtp_target, self.stt_actr, stt_sess_id, self.ring)
         self.sessions[rep.id] = rep
         return (rep.id, rep.rserv.uopts.laddress)
 
@@ -133,8 +134,13 @@ class InfernRTPActor():
 
     def loop(self):
         from sippy.Core.EventDispatcher import ED2
+        self.ring = InfernRTPIngest()
+        self.ring.start()
         ED2.my_ident = get_ident()
-        return (ED2.loop())
+        rval = ED2.loop()
+        self.ring.stop()
+        self.ring.join()
+        return rval
 
     def stop(self):
         from sippy.Core.EventDispatcher import ED2
