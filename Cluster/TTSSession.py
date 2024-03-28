@@ -85,8 +85,8 @@ class TTSSession(InfernWrkThread):
                 self.tts.tts_rt(p, self.soundout_cb, sent.speaker)
                 if i < len(sents) - 1:
                     self.soundout(chunk=TTSSMarkerNewSent())
-            if sent.done_cb is not None:
-                self.soundout(chunk=TTSSMarkerSentDoneCB(sent.done_cb, sync=True))
+            mark = TTSSMarkerNewSent() if sent.done_cb is None else TTSSMarkerSentDoneCB(sent.done_cb, sync=True)
+            self.soundout(chunk=mark)
         self.soundout(chunk=TTSSMarkerEnd())
         del self.soundout
 
@@ -95,9 +95,9 @@ class TTSSession(InfernWrkThread):
             chunk = chunk.to('cpu')
         return ray.get(self.soundout(chunk=chunk))
 
-    def say(self, text, done_cb:Optional[callable]):
+    def say(self, text, speaker, done_cb:Optional[callable]):
         print(f'{monotonic():4.3f}: TTSSession.say')
-        speaker = self.tts.get_rand_voice()
+        speaker = self.tts.get_rand_voice() if speaker is None else self.tts.get_voice(speaker)
         self.next_sentence_q.put(TTSRequest(text, speaker, done_cb=done_cb))
 
     def stop(self):

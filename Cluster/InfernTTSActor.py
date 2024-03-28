@@ -29,9 +29,9 @@ class InfernTTSActor():
         rgen = self.sessions[rgen_id]
         rgen.start(soundout)
 
-    def tts_session_say(self, rgen_id, text, done_cb:Optional[callable]=None):
+    def tts_session_say(self, rgen_id, text, done_cb:Optional[callable]=None, speaker_id=None):
         rgen = self.sessions[rgen_id]
-        rgen.say(text, done_cb)
+        rgen.say(text, speaker_id, done_cb)
 
     def tts_session_end(self, rgen_id):
         rgen = self.sessions[rgen_id]
