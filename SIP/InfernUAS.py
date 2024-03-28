@@ -94,8 +94,8 @@ class InfernTTSUAS(UA):
         self.id = uuid4()
         self.sip_actr, self.rtp_actr = sip_actr, rtp_actr
         self._tsess = RemoteTTSSession(tts_actr)
-        activate_cb = partial(sip_actr.sess_event.remote, sip_sess_id=self.id, event=CCEventSTTTextIn())
-        self.stt_sess_id = stt_actr.new_stt_session.remote(activate_cb)
+        text_cb = partial(sip_actr.sess_event.remote, sip_sess_id=self.id, event=CCEventSTTTextIn())
+        self.stt_sess_id = stt_actr.new_stt_session.remote(text_cb)
         super().__init__(sippy_c, self.outEvent)
         assert sip_t.noack_cb is None
         sip_t.noack_cb = self.sess_term
@@ -150,7 +150,10 @@ class InfernTTSUAS(UA):
     def recvEvent(self, event):
         if self._tsess is None: return
         if isinstance(event, CCEventSTTTextIn):
+            nsp = event.kwargs['no_speech_prob']
+            if nsp < 0.3: return
             r = event.kwargs['text']
+            print(f'STT: -> "{r}"')
             if r.strip() == "Let's talk.":
                 self.autoplay = False
             if self.autoplay:
