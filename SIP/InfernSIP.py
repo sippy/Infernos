@@ -33,6 +33,8 @@ from sippy.misc import local4remote
 
 from .InfernUAS import InfernTTSUAS
 
+from Core.T2T.Translator import Translator
+
 from utils.tts import human_readable_time, hal_set, smith_set, \
         bender_set
 
@@ -49,17 +51,18 @@ class InfernSIP(object):
     ua = None
     body = None
     ragent = None
+    sip_actr = None
     tts_actr = None
     stt_actr = None
     sippy_c = None
     sessions: WeakValueDictionary
 
-    def __init__(self, tts_actr, stt_actr, rtp_actr, iao):
+    def __init__(self, sip_actr, tts_actr, stt_actr, rtp_actr, iao):
         self.sippy_c = {'nh_addr':tuple(iao.nh_addr),
                         '_sip_address':iao.laddr,
                         '_sip_port':iao.lport,
                         '_sip_logger':iao.logger}
-        self.tts_actr, self.stt_actr, self.rtp_actr = tts_actr, stt_actr, rtp_actr
+        self.sip_actr, self.tts_actr, self.stt_actr, self.rtp_actr = sip_actr, tts_actr, stt_actr, rtp_actr
         self.sessions = WeakValueDictionary()
         self._o = iao
         udsc, udsoc = SipTransactionManager.model_udp_server
@@ -76,9 +79,12 @@ class InfernSIP(object):
                 user=iao.authname, passw=iao.authpass,
                 rok_cb=good, rfail_cb=bad)
         ragent.rmsg.getHFBody('to').getUrl().username = iao.cld
+        prompts = ['Welcome to Infernos.'] + bender_set(2) + \
+                   smith_set() + hal_set() #+ t900_set()
+        #tr = Translator('en', 'it')
+        #self.prompts = [tr.translate(p) for p in prompts]
+        self.prompts = prompts
         ragent.doregister()
-        self.prompts = ['Welcome to Infernos.'] + bender_set(2) + \
-               smith_set() + hal_set() #+ t900_set()
 
     def recvRequest(self, req, sip_t):
         if req.getMethod() in ('NOTIFY', 'PING'):
@@ -88,8 +94,8 @@ class InfernSIP(object):
             #if self.rserv != None:
             #    return (req.genResponse(486, 'Busy Here'), None, None)
             # New dialog
-            isess = InfernTTSUAS(self.sippy_c, self.tts_actr, self.stt_actr, self.rtp_actr,
-                                 req, sip_t, self.getPrompts())
+            isess = InfernTTSUAS(self.sippy_c, self.sip_actr, self.tts_actr, self.stt_actr,
+                                 self.rtp_actr, req, sip_t, self.getPrompts())
             self.sessions[isess.id] = isess
             return
         return (req.genResponse(501, 'Not Implemented'), None, None)
