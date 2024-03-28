@@ -1,14 +1,13 @@
 from typing import Callable, Optional
 from time import monotonic
 import torch
-from transformers import SpeechT5ForTextToSpeech, SpeechT5PreTrainedModel, \
+from transformers import SpeechT5ForTextToSpeech, \
         SpeechT5HifiGanConfig, SpeechT5HifiGan, SpeechT5Processor, \
         SpeechT5Config
 from transformers.models.speecht5.modeling_speecht5 import \
         SpeechT5EncoderWithSpeechPrenet
 from transformers import PretrainedConfig, PreTrainedModel
 from datasets import load_dataset
-from threading import Lock
 import torch.nn as nn
 
 from config.InfernGlobals import InfernGlobals
@@ -242,10 +241,14 @@ class HelloSippyRT():
     vocoder: SpeechT5HifiGan
     model: SpeechT5ForTextToSpeech
     cuda_lock = InfernGlobals().torcher
-    def __init__(self, device, model="microsoft/speecht5_tts"):
+    default_model = "microsoft/speecht5_tts"
+    def __init__(self, device, model=default_model, get_processor:Optional[callable]=None):
         with self.cuda_lock:
-            self.processor = SpeechT5Processor.from_pretrained(model)
-            mc = SpeechT5Config(max_speech_positions=4000)
+            if get_processor is None:
+               self.processor = SpeechT5Processor.from_pretrained(model)
+            else:
+                self.processor = get_processor(device, model)
+            mc = SpeechT5Config.from_pretrained(model, max_speech_positions=4000)
             model = SpeechT5ForTextToSpeech.from_pretrained(model,
                                                             config=mc).to(device)
             model.eval()
