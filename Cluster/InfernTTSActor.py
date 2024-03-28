@@ -25,7 +25,7 @@ class InfernTTSActor():
         self.sessions[rgen.id] = rgen
         return rgen.id
 
-    def start_tts_session(self, rgen_id, soundout:callable):
+    def tts_session_start(self, rgen_id, soundout:callable):
         rgen = self.sessions[rgen_id]
         rtp_address = rgen.start(soundout)
         return rtp_address
@@ -34,7 +34,7 @@ class InfernTTSActor():
         rgen = self.sessions[rgen_id]
         rgen.say(text, done_cb)
 
-    def end_tts_session(self, rgen_id):
+    def tts_session_end(self, rgen_id):
         rgen = self.sessions[rgen_id]
         rgen.stop()
         del self.sessions[rgen_id]

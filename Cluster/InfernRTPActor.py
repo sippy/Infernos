@@ -72,7 +72,7 @@ class InfernRTPEPoint():
         self.writer.join()
         self.rserv.shutdown()
         self.rserv, self.writer = (None, None)
-        self.stt_actr.end_stt_session.remote(sess_id=self.stt_sess_id)
+        self.stt_actr.stt_session_end.remote(sess_id=self.stt_sess_id)
 
     def __del__(self):
         if self.debug:
