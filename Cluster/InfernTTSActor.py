@@ -27,8 +27,7 @@ class InfernTTSActor():
 
     def tts_session_start(self, rgen_id, soundout:callable):
         rgen = self.sessions[rgen_id]
-        rtp_address = rgen.start(soundout)
-        return rtp_address
+        rgen.start(soundout)
 
     def tts_session_say(self, rgen_id, text, done_cb:Optional[callable]=None):
         rgen = self.sessions[rgen_id]

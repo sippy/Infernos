@@ -11,22 +11,21 @@ class InfernSTTActor():
     debug = True
     sessions: dict
     stt: InfernSTTWorker
-    tts_actr: ray.actor
 
     def __init__(self):
         super().__init__()
         self.sessions = {}
 
-    def start(self, tts_actr):
-        self.stt = InfernSTTWorker(tts_actr, 'cuda')
+    def start(self):
+        self.stt = InfernSTTWorker('cuda')
         self.stt.start()
 
     def stop(self):
         self.stt.stop()
 
-    def new_stt_session(self, tts_sess_id, activate_cb):
+    def new_stt_session(self, activate_cb):
         if self.debug: print('InfernSTTActor.new_stt_session')
-        sess = STTSession(self.stt, tts_sess_id, activate_cb)
+        sess = STTSession(self.stt, activate_cb)
         self.sessions[sess.id] = sess
         return sess.id
 

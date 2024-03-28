@@ -15,7 +15,6 @@ from Cluster.STTSession import STTSession
 class STTWI():
     stt_sess: STTSession
     audio: torch.Tensor
-    tts_sess_id: UUID
     activate_cb: callable
 
 class InfernSTTWorker(InfernWrkThread):
@@ -26,7 +25,7 @@ class InfernSTTWorker(InfernWrkThread):
     cache_dir: str = '~/.cache/Infernos'
     inf_queue: Queue[Optional[STTWI]]
     sample_rate: int = 16000
-    def __init__(self, tts_actr, device: str, model_name: str = "openai/whisper-large-v3"):
+    def __init__(self, device: str, model_name: str = "openai/whisper-large-v3"):
         super().__init__()
         cache_dir = expanduser(f'{self.cache_dir}/{model_name}.ct2')
         if not any((path_exists(f'{cache_dir}/{_c}') for _c in ('model.bin', 'config.json', 'vocabulary.json'))):
@@ -40,11 +39,10 @@ class InfernSTTWorker(InfernWrkThread):
         self.processor = transformers.WhisperProcessor.from_pretrained(model_name)
         self.inf_queue = Queue()
         self.device = device
-        self.tts_actr = tts_actr
 
-    def infer(self, stt_sess, audio, tts_sess_id: UUID, activate_cb):
+    def infer(self, stt_sess, audio, activate_cb):
         wi = STTWI()
-        wi.stt_sess, wi.audio, wi.tts_sess_id, wi.activate_cb = stt_sess, audio, tts_sess_id, activate_cb
+        wi.stt_sess, wi.audio, wi.activate_cb = stt_sess, audio, activate_cb
         self.inf_queue.put(wi)
 
     idx: int = 0
