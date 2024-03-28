@@ -95,7 +95,7 @@ class InfernTTSUAS(UA):
         self.sip_actr, self.rtp_actr = sip_actr, rtp_actr
         self._tsess = RemoteTTSSession(tts_actr)
         activate_cb = partial(sip_actr.sess_event.remote, sip_sess_id=self.id, event=CCEventSTTTextIn())
-        self.stt_sess_id = stt_actr.new_stt_session.remote(self._tsess.sess_id, activate_cb)
+        self.stt_sess_id = stt_actr.new_stt_session.remote(activate_cb)
         super().__init__(sippy_c, self.outEvent)
         assert sip_t.noack_cb is None
         sip_t.noack_cb = self.sess_term
