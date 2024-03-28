@@ -15,25 +15,22 @@ class InfernTTSActor():
     sessions: Dict[UUID, TTSSession]
     tts: InfernTTSWorker
 
-    def __init__(self, rtp_actr, sip_actr, lang:str='en'):
+    def __init__(self, lang:str='en'):
         super().__init__()
         self.sessions = {}
         self.tts = InfernTTSWorker(lang)
-        self.rtp_actr = rtp_actr
-        self.sip_actr = sip_actr
-        self.tts_actr = ray.get_runtime_context().current_actor
 
     def new_tts_session(self):
         rgen = TTSSession(self.tts)
         self.sessions[rgen.id] = rgen
         return rgen.id
 
-    def start_tts_session(self, rgen_id, rtp_sess_id):
+    def start_tts_session(self, rgen_id, soundout:callable):
         rgen = self.sessions[rgen_id]
-        rtp_address = rgen.start(self.rtp_actr, rtp_sess_id)
+        rtp_address = rgen.start(soundout)
         return rtp_address
 
-    def tts_session_say(self, rgen_id, text, done_cb:Optional[ray.ObjectRef]=None):
+    def tts_session_say(self, rgen_id, text, done_cb:Optional[callable]=None):
         rgen = self.sessions[rgen_id]
         rgen.say(text, done_cb)
 

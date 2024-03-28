@@ -1,3 +1,5 @@
+from functools import partial
+
 import ray
 from ray.exceptions import RayTaskError
 
@@ -15,18 +17,11 @@ class RemoteRTPGen():
     def update(self, target):
         return ray.get(self.rtp_actr.rtp_session_update.remote(self.sess_id, target))
 
-    def soundout(self, chunk):
-        if not isinstance(chunk, TTSSMarkerGeneric):
-            chunk = chunk.to('cpu')
-        return ray.get(self.rtp_actr.rtp_session_soundout.remote(self.sess_id, chunk))
+    def get_soundout(self) -> callable:
+        return partial(self.rtp_actr.rtp_session_soundout.remote, rtp_id=self.sess_id)
 
     def end(self):
         return ray.get(self.rtp_actr.rtp_session_end.remote(self.sess_id))
 
     def join(self):
         return ray.get(self.rtp_actr.rtp_session_join.remote(self.sess_id))
-
-class RemoteRTPGenFromId(RemoteRTPGen):
-    def __init__(self, rtp_actr, sess_id):
-        self.rtp_actr = rtp_actr
-        self.sess_id = sess_id

@@ -30,16 +30,14 @@ from queue import Queue
 
 import ray
 
-from TTSRTPOutput import TTSSMarkerEnd, TTSSMarkerNewSent
-from Cluster.RemoteRTPGen import RemoteRTPGenFromId
+from TTSRTPOutput import TTSSMarkerEnd, TTSSMarkerNewSent, TTSSMarkerGeneric
 from Core.InfernWrkThread import InfernWrkThread, RTPWrkTStop, RTPWrkTInit
 
 class TTSSMarkerSentDoneCB(TTSSMarkerNewSent):
-    def __init__(self, done_cb:ray.ObjectRef, tts_sess: 'TTSSession', sync:bool=False):
+    def __init__(self, done_cb:callable, sync:bool=False):
         super().__init__()
         self.done_cb = done_cb
         self.sync = sync
-        self.tts_sess_id = tts_sess.id
 
     def on_proc(self, tro_self):
         print(f'{monotonic():4.3f}: TTSSMarkerSentDoneCB.on_proc')
@@ -49,8 +47,8 @@ class TTSSMarkerSentDoneCB(TTSSMarkerNewSent):
 class TTSRequest():
     text: str
     speaker = None
-    done_cb: Optional[ray.ObjectRef]
-    def __init__(self, text:str, speaker, done_cb:Optional[ray.ObjectRef]=None):
+    done_cb: Optional[callable]
+    def __init__(self, text:str, speaker, done_cb:Optional[callable]=None):
         self.text = text
         self.speaker = speaker
         self.done_cb = done_cb
@@ -59,7 +57,7 @@ class TTSSession(InfernWrkThread):
     debug = True
     id: UUID
     tts = None
-    worker: RemoteRTPGenFromId
+    soundout: callable
     next_sentence_q: Queue[TTSRequest]
 
     def __init__(self, tts):
@@ -67,11 +65,10 @@ class TTSSession(InfernWrkThread):
         self.id = uuid4()
         self.tts = tts
 
-    def start(self, rtp_actr, rtp_sess_id):
-        worker = RemoteRTPGenFromId(rtp_actr, rtp_sess_id)
+    def start(self, soundout:callable):
         self.state_lock.acquire()
         assert self.get_state(locked=True) == RTPWrkTInit
-        self.worker = worker
+        self.soundout = soundout
         self.next_sentence_q = Queue()
         self.state_lock.release()
         super().start()
@@ -85,19 +82,20 @@ class TTSSession(InfernWrkThread):
             for i, p in enumerate(sents):
                 if self.get_state() == RTPWrkTStop: break
                 print(f'{monotonic():4.3f}: Playing', p)
-                self.tts.tts_rt(p, self.worker.soundout, sent.speaker)
+                self.tts.tts_rt(p, self.soundout_cb, sent.speaker)
                 if i < len(sents) - 1:
-                    self.worker.soundout(TTSSMarkerNewSent())
+                    self.soundout(chunk=TTSSMarkerNewSent())
             if sent.done_cb is not None:
-                self.worker.soundout(TTSSMarkerSentDoneCB(sent.done_cb, self, sync=True))
-        if self.get_state() == RTPWrkTStop:
-            self.worker.end()
+                self.soundout(chunk=TTSSMarkerSentDoneCB(sent.done_cb, sync=True))
+        self.soundout(chunk=TTSSMarkerEnd())
+        del self.soundout
 
-        self.worker.soundout(TTSSMarkerEnd())
-        self.worker.join()
-        del self.worker
+    def soundout_cb(self, chunk):
+        if not isinstance(chunk, TTSSMarkerGeneric):
+            chunk = chunk.to('cpu')
+        return ray.get(self.soundout(chunk=chunk))
 
-    def say(self, text, done_cb:Optional[ray.ObjectRef]):
+    def say(self, text, done_cb:Optional[callable]):
         print(f'{monotonic():4.3f}: TTSSession.say')
         speaker = self.tts.get_rand_voice()
         self.next_sentence_q.put(TTSRequest(text, speaker, done_cb=done_cb))

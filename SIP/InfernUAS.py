@@ -134,7 +134,7 @@ class InfernTTSUAS(UA):
         if rtp_target is None: return
         try:
             self.rsess = RemoteRTPGen(self.rtp_actr, ray.get(self.stt_sess_id), rtp_target)
-            self._tsess.start(self.rsess.sess_id)
+            self._tsess.start(self.rsess.get_soundout())
         except RTPGenError as e:
             event = InfernUASFailure(code=500, reason=str(e))
             self.recvEvent(event)
@@ -148,6 +148,7 @@ class InfernTTSUAS(UA):
         self.recvEvent(CCEventSentDone())
 
     def recvEvent(self, event):
+        if self._tsess is None: return
         if isinstance(event, CCEventSTTTextIn):
             r = event.kwargs['text']
             if r.strip() == "Let's talk.":
@@ -178,6 +179,7 @@ class InfernTTSUAS(UA):
             return
         self._tsess.end()
         self._tsess = None
+        self.rsess.join()
         if ua != self:
             self.disconnect()
 
