@@ -15,10 +15,10 @@ class InfernTTSActor():
     sessions: Dict[UUID, TTSSession]
     tts: InfernTTSWorker
 
-    def __init__(self, rtp_actr, sip_actr):
+    def __init__(self, rtp_actr, sip_actr, lang:str='en'):
         super().__init__()
         self.sessions = {}
-        self.tts = InfernTTSWorker()
+        self.tts = InfernTTSWorker(lang)
         self.rtp_actr = rtp_actr
         self.sip_actr = sip_actr
         self.tts_actr = ray.get_runtime_context().current_actor

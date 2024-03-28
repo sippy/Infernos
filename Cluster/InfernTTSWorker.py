@@ -7,16 +7,31 @@ from HelloSippyTTSRT.HelloSippyRT import HelloSippyRT
 
 from TTSRTPOutput import TTSRTPOutput, TTSSMarkerEnd
 
+def get_ja_T5Processor(device, model_name):
+    from utils.speecht5_openjtalk_tokenizer import SpeechT5OpenjtalkTokenizer
+    from transformers import SpeechT5Processor, SpeechT5FeatureExtractor
+
+    print(f'get_ja_T5Processor: device = {device}, model_name = {model_name}')
+    tokenizer = SpeechT5OpenjtalkTokenizer.from_pretrained(model_name)
+    tokenizer._in_target_context_manager = False
+    tokenizer.split_special_tokens = True
+    tokenizer._added_tokens_encoder = {}
+    tokenizer._unk_token = None
+    feature_extractor = SpeechT5FeatureExtractor.from_pretrained(model_name)
+    return SpeechT5Processor(feature_extractor, tokenizer)
+
 lang2model = {'en': {},
-              'it': {'model':"Sandiago21/speecht5_finetuned_voxpopuli_it"},
-              'de': {'model':"JFuellem/speecht5_finetuned_voxpopuli_de"},
+              'it': {'model':'Sandiago21/speecht5_finetuned_voxpopuli_it'},
+              'de': {'model':'JFuellem/speecht5_finetuned_voxpopuli_de'},
+              'ru': {'model':'zaebee/speecht5_tts_common_ru'},
+              'ja': {'model': 'esnya/japanese_speecht5_tts', 'get_processor': get_ja_T5Processor},
              }
 
 class InfernTTSWorker(HelloSippyRT):
     device = 'cuda' if ipex is None else 'xpu'
     debug = False
 
-    def __init__(self, lang='en'):
+    def __init__(self, lang):
         super().__init__(self.device, **lang2model[lang])
         if ipex is not None:
             self.model = ipex.optimize(self.model)
@@ -45,7 +60,7 @@ class InfernTTSWorker(HelloSippyRT):
         writer.soundout(TTSSMarkerEnd())
 
 if __name__ == '__main__':
-    tts = InfernTTSWorker()
+    tts = InfernTTSWorker('en')
     prompts = (
         "Hello and welcome to Sippy Software, your VoIP solution provider.",
         "Today is Wednesday twenty third of August two thousand twenty three, five thirty in the afternoon.",
