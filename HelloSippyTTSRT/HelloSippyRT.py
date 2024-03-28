@@ -1,5 +1,6 @@
 from typing import Callable, Optional
 from time import monotonic
+
 import torch
 from transformers import SpeechT5ForTextToSpeech, \
         SpeechT5HifiGanConfig, SpeechT5HifiGan, SpeechT5Processor, \
@@ -9,6 +10,7 @@ from transformers.models.speecht5.modeling_speecht5 import \
 from transformers import PretrainedConfig, PreTrainedModel
 from datasets import load_dataset
 import torch.nn as nn
+from methodtools import lru_cache
 
 from config.InfernGlobals import InfernGlobals
 
@@ -271,6 +273,12 @@ class HelloSippyRT():
     def get_rand_voice(self):
         with self.cuda_lock:
             s_index = torch.randint(0, len(self.speaker_embeddings), (1,)).item()
+            rv = self.speaker_embeddings[s_index].to(self.model.device)
+            return rv
+
+    @lru_cache(maxsize=16)
+    def get_voice(self, s_index:int):
+        with self.cuda_lock:
             rv = self.speaker_embeddings[s_index].to(self.model.device)
             return rv
 

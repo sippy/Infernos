@@ -11,3 +11,4 @@ inflect>=7.*
 sentencepiece>=0.1.*
 ctranslate2>=4.1.*
 git+https://github.com/fusorai/argos-translate.git
+methodtools
