@@ -10,7 +10,7 @@ import ray
 from Cluster.TTSSession import TTSSession
 from Cluster.InfernTTSWorker import InfernTTSWorker
 
-@ray.remote
+@ray.remote(resources={"tts": 1})
 class InfernTTSActor():
     sessions: Dict[UUID, TTSSession]
     tts: InfernTTSWorker

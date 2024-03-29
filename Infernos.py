@@ -82,7 +82,7 @@ if __name__ == '__main__':
         lfile = open(logfile, 'a')
 
     try:
-        default_resources = {'stt': 1, 'rtp': 1};
+        default_resources = {'stt': 1, 'tts':1, 'rtp': 1};
         ray.init(num_gpus=1, resources = default_resources)
     except ValueError as ex:
         if str(ex).index('connecting to an existing cluster') < 0: raise ex
