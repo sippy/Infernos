@@ -8,7 +8,7 @@ from Cluster.STTSession import STTSession
 
 @ray.remote(num_gpus=1, resources={"stt": 1})
 class InfernSTTActor():
-    debug = True
+    debug = False
     sessions: dict
     stt: InfernSTTWorker
 

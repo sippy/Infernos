@@ -1,7 +1,7 @@
 from uuid import uuid4, UUID
 
 class STTSession():
-    debug = True
+    debug = False
     id: UUID
     lang: str = 'en'
 
