@@ -87,7 +87,7 @@ class TestSession():
     def average_error(self):
         return self.tot_error / self.nres
 
-@ray.remote
+@ray.remote(resources={"head": 1})
 class InfernBenchActor():
     queue: Queue
     sessions: Dict[int, TestSession]
@@ -100,7 +100,7 @@ class InfernBenchActor():
         self.queue = Queue()
         self.sessions = {}
         tts_actrs = tuple(InfernTTSActor.remote() for _ in range(2))
-        stt_actrs = tuple(InfernSTTActor.remote() for _ in range(2))
+        stt_actrs = tuple(InfernSTTActor.remote() for _ in range(3))
         for x in tuple(stt_actr.start.remote() for stt_actr in stt_actrs): ray.get(x)
         self_actor = ray.get_runtime_context().current_actor
         prompts = [(x, get_embedding(tokenizer, model, x)) for x in _prompts]
