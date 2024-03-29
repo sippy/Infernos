@@ -49,7 +49,7 @@ class InfernTorcher():
         self._nlocks += 1
         nlocks = self._nlocks
         self._torch_lock.release()
-        if (nlocks % 10) == 0:
+        if (nlocks % 100) == 0:
             print(f"Torch load: {bt / (bt + ft)}")
 
     def acquire(self):
