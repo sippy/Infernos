@@ -93,7 +93,10 @@ class TTSSession(InfernWrkThread):
     def soundout_cb(self, chunk):
         if not isinstance(chunk, TTSSMarkerGeneric):
             chunk = chunk.to('cpu')
-        return ray.get(self.soundout(chunk=chunk))
+        res = self.soundout(chunk=chunk)
+        if isinstance(res, ray.ObjectRef):
+            res = ray.get(res)
+        return res
 
     def say(self, text, speaker, done_cb:Optional[callable]):
         print(f'{monotonic():4.3f}: TTSSession.say')
