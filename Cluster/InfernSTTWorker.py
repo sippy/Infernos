@@ -10,12 +10,7 @@ import transformers
 import soundfile as sf
 
 from Core.InfernWrkThread import InfernWrkThread, RTPWrkTRun
-from Cluster.STTSession import STTSession
-
-class STTWI():
-    stt_sess: STTSession
-    audio: torch.Tensor
-    text_cb: callable
+from Cluster.STTSession import STTRequest
 
 class InfernSTTWorker(InfernWrkThread):
     max_batch_size: int = 4
@@ -23,7 +18,7 @@ class InfernSTTWorker(InfernWrkThread):
     processor: transformers.WhisperProcessor
     device: str
     cache_dir: str = '~/.cache/Infernos'
-    inf_queue: Queue[Optional[STTWI]]
+    inf_queue: Queue[Optional[STTRequest]]
     sample_rate: int = 16000
     def __init__(self, device: str, model_name: str = "openai/whisper-large-v3"):
         super().__init__()
@@ -40,14 +35,12 @@ class InfernSTTWorker(InfernWrkThread):
         self.inf_queue = Queue()
         self.device = device
 
-    def infer(self, stt_sess, audio, text_cb):
-        wi = STTWI()
-        wi.stt_sess, wi.audio, wi.text_cb = stt_sess, audio, text_cb
+    def infer(self, wi:STTRequest):
         self.inf_queue.put(wi)
 
-    idx: int = 0
+    #idx: int = 0
 
-    def next_batch(self) -> STTWI:
+    def next_batch(self) -> STTRequest:
         wis = []
         while len(wis) < self.max_batch_size:
             if len(wis) == 0:
@@ -81,7 +74,7 @@ class InfernSTTWorker(InfernWrkThread):
                    f"<|{language}|>",
                     "<|transcribe|>",
                     "<|notimestamps|>",  # Remove this token to generate timestamps.
-                ]) for language in (wi.stt_sess.lang for wi in wis)]
+                ]) for language in (wi.lang for wi in wis)]
             results = self.model.generate(features, prompt, return_no_speech_prob=True)
             good_results = [(wis[i], self.processor.decode(r.sequences_ids[0]), r.no_speech_prob)
                              for i, r in enumerate(results)]

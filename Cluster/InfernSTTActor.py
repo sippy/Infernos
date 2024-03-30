@@ -4,7 +4,7 @@
 import ray
 
 from Cluster.InfernSTTWorker import InfernSTTWorker
-from Cluster.STTSession import STTSession
+from Cluster.STTSession import STTSession, STTRequest
 
 @ray.remote(num_gpus=1, resources={"stt": 1})
 class InfernSTTActor():
@@ -35,8 +35,8 @@ class InfernSTTActor():
         sess.stop()
         del self.sessions[sess_id]
 
-    def stt_session_soundin(self, sess_id, chunk):
+    def stt_session_soundin(self, sess_id, req:STTRequest):
         if self.debug: print('InfernSTTActor.stt_session_soundin')
         sess = self.sessions[sess_id]
-        sess.soundin(chunk)
+        sess.soundin(req)
         return sess_id

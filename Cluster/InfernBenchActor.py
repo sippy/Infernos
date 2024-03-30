@@ -10,6 +10,7 @@ from scipy.spatial.distance import cosine
 
 from Cluster.InfernTTSActor import InfernTTSActor
 from Cluster.InfernSTTActor import InfernSTTActor
+from Cluster.STTSession import STTRequest
 from TTSRTPOutput import TTSSMarkerNewSent, TTSSMarkerEnd
 
 from utils.tts import smith_set, bender_set, hal_set
@@ -22,8 +23,10 @@ def get_embedding(t, m, sentence):
 class SoundPreBatcher():
     audio: Optional[torch.Tensor] = None
     deliver: callable
-    def __init__(self, deliver):
+    stt_done: callable
+    def __init__(self, deliver, stt_done:callable):
         self.deliver = deliver
+        self.stt_done = stt_done
 
     def __call__(self, chunk):
         if not isinstance(chunk, TTSSMarkerNewSent):
@@ -32,7 +35,7 @@ class SoundPreBatcher():
             self.audio = audio
             #print(f'audio: {ts.audio.size()=}')
         else:
-            self.deliver(torch.cat(self.audio).numpy())
+            self.deliver(STTRequest(torch.cat(self.audio).numpy(), self.stt_done, 'en'))
             self.audio = None
         return (0, False)
 
@@ -44,7 +47,7 @@ class TestPipe():
         stt_done = partial(stt_done, session_id=self.id)
         self.stt_sess = ray.get(stt_actr.new_stt_session.remote(stt_done))
         self.stt_soundin = partial(stt_actr.stt_session_soundin.remote, self.stt_sess)
-        tts_soundout = SoundPreBatcher(self.stt_soundin)
+        tts_soundout = SoundPreBatcher(self.stt_soundin, stt_done)
         ray.get(tts_actr.tts_session_start.remote(self.tts_sess, tts_soundout))
         self.tts_say = partial(tts_actr.tts_session_say.remote, rgen_id=self.tts_sess)
 
