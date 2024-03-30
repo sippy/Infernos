@@ -10,7 +10,7 @@ from scipy.spatial.distance import cosine
 
 from Cluster.InfernTTSActor import InfernTTSActor
 from Cluster.InfernSTTActor import InfernSTTActor
-from Cluster.STTSession import STTRequest
+from Cluster.STTSession import STTRequest, STTResult
 from TTSRTPOutput import TTSSMarkerNewSent, TTSSMarkerEnd
 
 from utils.tts import smith_set, bender_set, hal_set
@@ -69,19 +69,18 @@ class TestSession():
         self.model = model
         self.audio = torch.zeros(0)
 
-    def next_prompt(self, last_res=None):
+    def next_prompt(self, last_res:Optional[STTResult]=None):
         play_id = 0 if last_res is None else 1
         if len(self.prompts) > play_id:
             res = self.test_pipe.tts_say(text=self.prompts[play_id][0], speaker_id=self.speaker_id)
             ray.get(res)
         if play_id > 0:
             embedding1 = self.prompts.pop(0)[1]
-            last_text, no_speech_prob = last_res
-            embedding2 = get_embedding(self.tokenizer, self.model, last_text)
+            embedding2 = get_embedding(self.tokenizer, self.model, last_res.text)
             similarity = 1 - cosine(embedding1, embedding2)
             self.nres += 1
             assert similarity >= 0.0 and similarity <= 1.0
-            assert no_speech_prob >= 0.0 and no_speech_prob <= 1.0
+            assert last_res.no_speech_prob >= 0.0 and last_res.no_speech_prob <= 1.0
             #self.tot_error += ((1.0 - similarity) + no_speech_prob) / 2
             self.tot_error += 1.0 - similarity
             print(f"Cosine Similarity[{self.speaker_id}]: average_error={self.average_error()}")
@@ -163,10 +162,10 @@ class InfernBenchActor():
         for ts in res:
             print(f"Speaker[{ts.speaker_id}]: average_error={ts.average_error()}")
 
-    def stt_done(self, session_id, text, no_speech_prob):
+    def stt_done(self, session_id, result:STTResult):
         ts = self.sessions[session_id]
-        print(f'text: {text}, no_speech_prob: {no_speech_prob}')
-        more = ts.next_prompt((text, no_speech_prob))
+        print(f'text: {result.text}, no_speech_prob: {result.no_speech_prob}')
+        more = ts.next_prompt(result)
         if not more:
             del self.sessions[session_id]
             self.queue.put(ts)

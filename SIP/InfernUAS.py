@@ -150,15 +150,15 @@ class InfernTTSUAS(UA):
     def recvEvent(self, event):
         if self._tsess is None: return
         if isinstance(event, CCEventSTTTextIn):
-            nsp = event.kwargs['no_speech_prob']
+            res = event.kwargs['result']
+            nsp = res.no_speech_prob
             if nsp < 0.3: return
-            r = event.kwargs['text']
-            print(f'STT: -> "{r}"')
-            if r.strip() == "Let's talk.":
+            print(f'STT: -> "{res.text}"')
+            if res.text.strip() == "Let's talk.":
                 self.autoplay = False
             if self.autoplay:
                 return
-            self._tsess.say(r)
+            self._tsess.say(res.text)
             return
         if isinstance(event, CCEventSentDone):
             if not self.autoplay:

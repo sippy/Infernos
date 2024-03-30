@@ -1,16 +1,14 @@
-from typing import Optional
+from typing import Optional, Tuple
 from queue import Queue, Empty as QueueEmpty
-from uuid import UUID
 from os.path import expanduser, exists as path_exists
 from subprocess import Popen, PIPE
 
-import torch
 import ctranslate2
 import transformers
-import soundfile as sf
+from methodtools import lru_cache
 
 from Core.InfernWrkThread import InfernWrkThread, RTPWrkTRun
-from Cluster.STTSession import STTRequest
+from Cluster.STTSession import STTRequest, STTResult
 
 class InfernSTTWorker(InfernWrkThread):
     max_batch_size: int = 4
@@ -68,22 +66,34 @@ class InfernSTTWorker(InfernWrkThread):
             #ldet = dict([(i, features[i]) for i, wi in enumerate(wis) if wi.stt_sess.lang is None])
             #results = self.model.detect_language(features)
             #print(f'{results=}')
-            prompt = [self.processor.tokenizer.convert_tokens_to_ids(
+            ##prompt = [self.processor.tokenizer.convert_tokens_to_ids(
+            ##    [
+            ##        "<|startoftranscript|>",
+            ##       f"<|{language}|>",
+            ##        "<|transcribe|>",
+            ##        "<|notimestamps|>",  # Remove this token to generate timestamps.
+            ##    ]) for language in (wi.lang for wi in wis)]
+            prompt = self.get_prompt(tuple(wi.lang for wi in wis))
+            results = self.model.generate(features, prompt, return_no_speech_prob=True)
+            good_results = [(wi, self.processor.decode(r.sequences_ids[0]), r.no_speech_prob)
+                             for wi, r in zip(wis, results)]
+            for wi, r, nsp in good_results:
+                wi.text_cb(result = STTResult(text=r, no_speech_prob=nsp))
+            #with torch.no_grad():
+            #    audio = wi.audio.to(self.device)
+            #    res = wi.stt_sess.model(audio)
+            #    wi.res_queue.put(res)
+
+    @lru_cache(maxsize=16)
+    def get_prompt(self, langs:Tuple[str]):
+        prompt = tuple(self.processor.tokenizer.convert_tokens_to_ids(
                 [
                     "<|startoftranscript|>",
                    f"<|{language}|>",
                     "<|transcribe|>",
                     "<|notimestamps|>",  # Remove this token to generate timestamps.
-                ]) for language in (wi.lang for wi in wis)]
-            results = self.model.generate(features, prompt, return_no_speech_prob=True)
-            good_results = [(wis[i], self.processor.decode(r.sequences_ids[0]), r.no_speech_prob)
-                             for i, r in enumerate(results)]
-            for wi, r, nsp in good_results:
-                wi.text_cb(text=r, no_speech_prob=nsp)
-            #with torch.no_grad():
-            #    audio = wi.audio.to(self.device)
-            #    res = wi.stt_sess.model(audio)
-            #    wi.res_queue.put(res)
+                ]) for language in langs)
+        return prompt
 
     def stop(self):
         self.inf_queue.put(None)
