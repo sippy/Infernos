@@ -1,4 +1,6 @@
-try: import intel_extension_for_pytorch as ipex
+try:
+    import intel_extension_for_pytorch as ipex
+    ipex.enable_onednn_fusion(True)
 except ModuleNotFoundError: ipex = None
 
 import sys, random, weakref, uuid
@@ -13,6 +15,7 @@ import numpy as np
 import torch
 from torch.nn import functional as F
 from datasets import load_dataset
+from methodtools import lru_cache
 
 try: from config.InfernGlobals import InfernGlobals
 except ModuleNotFoundError:
@@ -55,16 +58,18 @@ class HelloSippyRTPipe: pass
 class HelloSippyPlayRequest(SessDispatchCmd):
     text:str
     speaker:torch.Tensor
-    dispatch:weakref.ref[Queue]
-    def __init__(self, session_id:uuid.UUID, text:str, speaker:torch.Tensor, dispatch:weakref.ref[Queue]): self.text, self.speaker, self.dispatch = (super().__init__(session_id), text, speaker, dispatch)[1:] 
+    dispatch:callable
+    def __init__(self, session_id:uuid.UUID, text:str, speaker:torch.Tensor, dispatch:callable):
+        self.text, self.speaker, self.dispatch = text, speaker, dispatch
+        super().__init__(session_id)
 
 def make_tensor(x, pp): return torch.tensor([x], dtype=torch.long, device=pp.model.device)
 
-def maybe_half(x): return x
+def maybe_half(x): return x.to(memory_format=torch.channels_last, dtype=torch.bfloat16) if not isinstance(x, torch.Tensor) or len(x.shape) > 3 else x.to(dtype=torch.bfloat16)
 
 class HelloSippyPipeState:
     session:uuid.UUID
-    dispatch:weakref.ref[Queue]
+    dispatch:callable
     inputs:torch.Tensor
     speaker_embeddings:torch.Tensor
     encoder_last_hidden_state:torch.Tensor
@@ -95,7 +100,7 @@ class HelloSippyPipeStateBatched:
     minlen:int
     maxlen:int
     idx: int = 0
-    dispatch:List[weakref.ref[Queue]]
+    dispatch:List[callable]
     sessions:List[uuid.UUID]
 
     def __init__(self, states: List[HelloSippyPipeState], pp:HelloSippyRTPipe):
@@ -195,22 +200,26 @@ class trp_thread(threading.Thread):
 
 import torchaudio.transforms as T
 
+class WeakDispatcher():
+    def __init__(self, queue:Queue): self.queue = weakref.ref(queue)
+    def __call__(self, res):
+        q = self.queue()
+        if q: q.put(res.numpy() if res else None)
+
 class InfernSession:
     _cmd_queue:Queue
     id:uuid.UUID
     default_speaker:torch.Tensor
     def __init__(self, queue, default_speaker:torch.Tensor): self.id, self._cmd_queue, self.default_speaker = uuid.uuid4(), queue, default_speaker
     def play(self, text:str, dispatch:Queue, speaker:Optional[torch.Tensor] = None):
-        cmd = HelloSippyPlayRequest(self.id, text, speaker if speaker else self.default_speaker, weakref.ref(dispatch))
+        cmd = HelloSippyPlayRequest(self.id, text, speaker if speaker else self.default_speaker, WeakDispatcher(dispatch))
         self._cmd_queue.put(cmd)
 
 class HelloSippyRTPipe:
-    _main_thread_id: int
-    _sync_queue: Queue
     processor: SpeechT5Processor
     model: SpeechT5ForTextToSpeech
     chunker: AmendmentNetwork1
-    resampler: T.Resample
+    resampler: Optional[T.Resample]
     minlenratio: float = 0.0
     maxlenratio: float = 20.0
     threshold: float = 0.5
@@ -218,19 +227,18 @@ class HelloSippyRTPipe:
     pre_nframes: int = 2
     post_nframes: int = 2
     model_sr: int = 16000
-    dispatch_sr: int = 8000
-    sessions: weakref.WeakValueDictionary[InfernSession]
-    max_sessions: int = 50
+    dispatch_sr: int = 16000
+    default_model = "microsoft/speecht5_tts"
 
-    def __init__(self, device, **kwa):
-        self._main_thread_id = threading.get_ident()
-        self._sync_queue = Queue()
-        self.sessions = weakref.WeakValueDictionary()
+    def __init__(self, device, model=default_model, get_processor:Optional[callable]=None, **kwa):
         self.cuda_lock = InfernGlobals().torcher
         with self.cuda_lock:
-            self.processor = SpeechT5Processor.from_pretrained("microsoft/speecht5_tts")
-            mc = SpeechT5Config(max_speech_positions=4000, **kwa)
-            model = maybe_half(SpeechT5ForTextToSpeech.from_pretrained("microsoft/speecht5_tts",
+            if get_processor is None:
+               self.processor = SpeechT5Processor.from_pretrained(model)
+            else:
+                self.processor = get_processor(device, model)
+            mc = SpeechT5Config.from_pretrained(model, max_speech_positions=4000, **kwa)
+            model = maybe_half(SpeechT5ForTextToSpeech.from_pretrained(model,
                                                             config=mc)).to(device)
             model.speecht5.decoder = maybe_half(model.speecht5.decoder)
             model.speecht5.encoder = maybe_half(model.speecht5.encoder)
@@ -251,51 +259,12 @@ class HelloSippyRTPipe:
             self.speaker_embeddings = [torch.tensor(ed["xvector"], device='cpu').unsqueeze(0)
                                         for ed in sorted(embeddings_dataset, key=lambda x: x['filename'])]
             for x in [_x for x in (self.model.parameters, self.vocoder.parameters, self.chunker.parameters) for _x in x()] + self.speaker_embeddings: x.requires_grad = False
-            self.resampler = maybe_half(T.Resample(orig_freq=self.model_sr, new_freq=self.dispatch_sr)).to(device)
+            if self.model_sr != self.dispatch_sr:
+                self.resampler = maybe_half(T.Resample(orig_freq=self.model_sr, new_freq=self.dispatch_sr)).to(device)
+            else:
+                self.resampler = None
 
-    def alloc_session(self, speaker:Optional[torch.Tensor]=None) -> Tuple[InfernSession, HelloSippyPipeState]:
-        assert threading.get_ident() == self._main_thread_id
-        if len(self.sessions) >= self.max_sessions: raise ErrMaxSessReached(f'No more sessions available {self.max_sessions=}')
-        if not speaker: speaker = self.get_rand_voice()
-        rv = InfernSession(self._sync_queue, speaker)
-        self.sessions[rv.id] = rv
-        ss = SessSyncCmd(self.sessions)
-        self._sync_queue.put(ss)
-        return rv
-
-    def savetensor(self, tensor:torch.Tensor, name:str):
-        fname = f'{name}{self.saveidx}.npy'
-        np.save(fname, tensor.cpu().numpy())
-
-    class WorkerState: state:Optional[HelloSippyPipeStateBatched]=None; live:Optional[List[uuid.UUID]]=None
-  
-    @trp_thread(noreturn=True)
-    def synchronize(self, ws:Optional[WorkerState]) -> None:
-        if not ws: ws = self.WorkerState()
-        state = ws.state
-        if state: return (self.main_gen(ws), None)[-1]
-        ssq = [self._sync_queue.get(),]
-        try:
-            while True: ssq.append(self._sync_queue.get_nowait())
-        except QueueEmpty: pass
-        assert all(isinstance(x, SessCmd) for x in ssq)
-        syncs, reqs = [x for x in ssq if isinstance(x, SessSyncCmd)], [x for x in ssq if not isinstance(x, SessSyncCmd)]
-        if len(syncs) == 0 and len(reqs) == 0: raise AssertionError(f'this could not be happening {ssq=}')
-        #print(f'{len(syncs)=} {len(reqs)=} {syncs=}')
-        ws.live = live = syncs[-1].live if len(syncs) > 0 else ws.live
-        if not live: return (self.synchronize(ws), None)[-1]
-        reqs_live = [x for x in reqs if x.session in live]
-        if len(reqs_live) == 0: return (self.synchronize(ws), None)[-1]
-        with self.cuda_lock:
-            new_states = [HelloSippyPipeState(self, r) for r in reqs_live]
-            #if state: state.mergein(new_states)
-            ws.state = HelloSippyPipeStateBatched(new_states, self)
-        #raise Exception(f'{len(ssq)=} {reqs_live=} {live=} {len(self.sessions)=}')
-        self.main_gen(ws)
-
-    @trp_thread(noreturn=True)
-    def main_gen(self, ws:WorkerState) -> None:
-        state = ws.state
+    def infer(self, state:HelloSippyPipeStateBatched) -> None:
         with self.cuda_lock:
             batch_size = state.output_sequence.size(0)
             spectrogram = maybe_half(torch.zeros(batch_size, 0, self.model.config.num_mel_bins)).to(self.model.device)
@@ -344,33 +313,99 @@ class HelloSippyRTPipe:
             audio = self.chunker(spectrogram, audio)
             slices = audio.split(batch_size, dim=0)
             audio = torch.cat(slices, dim=1)
-            state.audio = self.resampler(audio)
-        #print(f'{state.ends_at.shape=} {state.ends_at.cpu().numpy()=} {state.audio.shape=}')
-        self.unbatch_and_dispatch(ws)
+            state.audio = self.resampler(audio) if self.resampler else audio
 
-    @trp_thread(noreturn=True)
-    def unbatch_and_dispatch(self, ws:WorkerState):
-        state = ws.state
+    def unbatch_and_dispatch(self, state:HelloSippyPipeStateBatched):
         audio, sr_rr = state.audio, self.model_sr / self.dispatch_sr
         end_idx = state.idx - 1
         stepsize = int(256 * 2 / sr_rr)
         with self.cuda_lock:
-            for i, cbq in [(i, cbq) for i, _cbq in enumerate(state.dispatch) if _cbq is not None and (cbq:=_cbq()) is not None]:
+            for i, dispatch in [(i, _cbq) for i, _cbq in enumerate(state.dispatch) if _cbq is not None]:
                 startoff = max(0, (asize:=audio[i].size(0)) - ((state.idx - state.starts_at[i].item()) * stepsize))
                 endoff = min(asize, asize - (((state.idx - ends_at) * stepsize) if (ends_at:=state.ends_at[i].item()) >=0 else 0))
-                cbq.put(audio[i][startoff:endoff].cpu().numpy())
+                dispatch(audio[i][startoff:endoff].cpu())
                 if ends_at >= 0 and ends_at <= end_idx:
-                    cbq.put(None)
+                    dispatch(None)
                     state.dispatch[i] = None
-                mask = ((state.ends_at < 0) | (state.ends_at > end_idx))
-                if torch.all(~mask):
-                    ws.state = None
-        self.synchronize(ws)
+            mask = ((state.ends_at < 0) | (state.ends_at > end_idx))
+            if torch.all(~mask):
+                return False
+        return True
 
     def get_rand_voice(self):
         s_index = torch.randint(0, len(self.speaker_embeddings), (1,)).item()
         rv = self.speaker_embeddings[s_index]
         return rv
+
+    @lru_cache(maxsize=16)
+    def get_voice(self, s_index:int):
+        rv = self.speaker_embeddings[s_index]
+        return rv
+
+class HelloSippyRTPipeTest(HelloSippyRTPipe):
+    _main_thread_id: int
+    _sync_queue: Queue
+    sessions: weakref.WeakValueDictionary[InfernSession]
+    max_sessions: int = 50
+
+    def __init__(self, *a, **kwa):
+        self._main_thread_id = threading.get_ident()
+        self._sync_queue = Queue()
+        self.sessions = weakref.WeakValueDictionary()
+        super().__init__(*a, **kwa)
+
+    def alloc_session(self, speaker:Optional[torch.Tensor]=None) -> Tuple[InfernSession, HelloSippyPipeState]:
+        assert threading.get_ident() == self._main_thread_id
+        if len(self.sessions) >= self.max_sessions: raise ErrMaxSessReached(f'No more sessions available {self.max_sessions=}')
+        if not speaker: speaker = self.get_rand_voice()
+        rv = InfernSession(self._sync_queue, speaker)
+        self.sessions[rv.id] = rv
+        ss = SessSyncCmd(self.sessions)
+        self._sync_queue.put(ss)
+        return rv
+
+    def savetensor(self, tensor:torch.Tensor, name:str):
+        fname = f'{name}{self.saveidx}.npy'
+        np.save(fname, tensor.cpu().numpy())
+
+    class WorkerState: state:Optional[HelloSippyPipeStateBatched]=None; live:Optional[List[uuid.UUID]]=None
+
+    @trp_thread(noreturn=True)
+    def synchronize(self, ws:Optional[WorkerState]) -> None:
+        if not ws: ws = self.WorkerState()
+        state = ws.state
+        if state: return (self.main_gen(ws), None)[-1]
+        ssq = [self._sync_queue.get(),]
+        try:
+            while True: ssq.append(self._sync_queue.get_nowait())
+        except QueueEmpty: pass
+        assert all(isinstance(x, SessCmd) for x in ssq)
+        syncs, reqs = [x for x in ssq if isinstance(x, SessSyncCmd)], [x for x in ssq if not isinstance(x, SessSyncCmd)]
+        if len(syncs) == 0 and len(reqs) == 0: raise AssertionError(f'this could not be happening {ssq=}')
+        #print(f'{len(syncs)=} {len(reqs)=} {syncs=}')
+        ws.live = live = syncs[-1].live if len(syncs) > 0 else ws.live
+        if not live: return (self.synchronize(ws), None)[-1]
+        reqs_live = [x for x in reqs if x.session in live]
+        if len(reqs_live) == 0: return (self.synchronize(ws), None)[-1]
+        with self.cuda_lock:
+            new_states = [HelloSippyPipeState(self, r) for r in reqs_live]
+            #if state: state.mergein(new_states)
+            ws.state = HelloSippyPipeStateBatched(new_states, self)
+        #raise Exception(f'{len(ssq)=} {reqs_live=} {live=} {len(self.sessions)=}')
+        self.main_gen(ws)
+
+    @trp_thread(noreturn=True)
+    def main_gen(self, ws:WorkerState) -> None:
+        super().infer(ws.state)
+        #print(f'{state.ends_at.shape=} {state.ends_at.cpu().numpy()=} {state.audio.shape=}')
+        self.unbatch_and_dispatch(ws)
+
+    @trp_thread(noreturn=True)
+    def unbatch_and_dispatch(self, ws:WorkerState):
+        more = super().unbatch_and_dispatch(ws.state)
+        if not more:
+            ws.state = None
+        self.synchronize(ws)
 
 class Timing(contextlib.ContextDecorator):
   def __init__(self, prefix="", on_exit=None, enabled=True): self.prefix, self.on_exit, self.enabled = prefix, on_exit, enabled
@@ -428,18 +463,19 @@ def main():
     params = {'hidden_dropout':0.0, 'positional_dropout':0.0, 'speech_decoder_prenet_dropout':0.0,
               'activation_dropout':0.0, 'encoder_layerdrop':0.0, 'decoder_layerdrop':0.0, 'attention_dropout':0.0,
               'speech_decoder_postnet_dropout':0.0, 'feat_proj_dropout':0.0}
-    sp = HelloSippyRTPipe('xpu')
+    sp = HelloSippyRTPipeTest('xpu')
     if ipex is not None:
-        sp.model = ipex.optimize(sp.model)
-        sp.vocoder = ipex.optimize(sp.vocoder)
-        sp.chunker = ipex.optimize(sp.chunker)
+        sp.model = ipex.optimize(sp.model, dtype=torch.bfloat16)
+        sp.vocoder = ipex.optimize(sp.vocoder, dtype=torch.bfloat16)
+        sp.chunker = ipex.optimize(sp.chunker, dtype=torch.bfloat16)
 
     s1 = [sp.alloc_session() for i in range(50)]
     del s1
     res_queue = Queue()
     from time import sleep
+    #sp.synchronize(None)
+    s2 = [((s:=sp.alloc_session()), (r:=res_cb(n, res_queue=res_queue)), s.play(p, r.q), 'sleep(0.5)') for n, p in enumerate(prompts)]
     sp.synchronize(None)
-    s2 = [((s:=sp.alloc_session()), (r:=res_cb(n, res_queue=res_queue)), s.play(p, r.q), sleep(0.5)) for n, p in enumerate(prompts)]
     for _ in range(len(s2)):
         res = res_queue.get()
         rtr = (res.time_to_last_frame - res.time_to_first_frame) / (res.number_of_frames / 8000)
