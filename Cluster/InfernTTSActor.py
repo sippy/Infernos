@@ -3,25 +3,30 @@ except ModuleNotFoundError: ipex = None
 
 from typing import Dict, Optional
 from uuid import UUID
-from functools import partial
 
 import ray
 
-from Cluster.TTSSession import TTSSession
+from Cluster.TTSSession import TTSSession2
 from Cluster.InfernTTSWorker import InfernTTSWorker
 
 @ray.remote(resources={"tts": 1})
 class InfernTTSActor():
-    sessions: Dict[UUID, TTSSession]
+    sessions: Dict[UUID, TTSSession2]
     tts: InfernTTSWorker
 
-    def __init__(self, lang:str='en'):
+    def __init__(self):
         super().__init__()
         self.sessions = {}
+
+    def start(self, lang:str='en'):
         self.tts = InfernTTSWorker(lang)
+        self.tts.start()
+
+    def stop(self):
+        self.tts.stop()
 
     def new_tts_session(self):
-        rgen = TTSSession(self.tts)
+        rgen = TTSSession2(self.tts)
         self.sessions[rgen.id] = rgen
         return rgen.id
 

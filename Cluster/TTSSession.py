@@ -110,3 +110,51 @@ class TTSSession(InfernWrkThread):
     def __del__(self):
         if self.debug:
             print('TTSSession.__del__')
+
+from functools import partial
+from HelloSippyTTSRT.HelloSippyRTPipe import HelloSippyPlayRequest
+
+class TTSSession2():
+    debug = True
+    id: UUID
+    tts = None
+    soundout: callable
+
+    def __init__(self, tts):
+        super().__init__()
+        self.id = uuid4()
+        self.tts = tts
+
+    def start(self, soundout:callable):
+        self.soundout = soundout
+
+    def sound_dispatch(self, chunk, done_cb, done_cb_local=False):
+        if chunk is None:
+            print(f'{monotonic():4.3f}: TTSSession.sound_dispatch {done_cb_local=} {done_cb=}')
+            if done_cb_local:
+                done_cb()
+                done_cb = None
+            chunk = TTSSMarkerNewSent() if done_cb is None else TTSSMarkerSentDoneCB(done_cb, sync=True)
+        elif not isinstance(chunk, TTSSMarkerGeneric):
+            assert chunk.size(0) > 0
+        self.soundout(chunk=chunk)
+
+    def say(self, text, speaker_id, done_cb:Optional[callable]):
+        if self.debug:
+            print(f'{monotonic():4.3f}: TTSSession.say: ${text=}, {speaker_id=}, {done_cb=}')
+        speaker = self.tts.get_rand_voice() if speaker_id is None else self.tts.get_voice(speaker_id)
+        text = text.split('|', 1)
+        if len(text) > 1:
+            done_cb = partial(self.say, text=text[1], speaker_id=speaker_id, done_cb=done_cb)
+            soundout = partial(self.sound_dispatch, done_cb=done_cb, done_cb_local=True)
+        else:
+            soundout = partial(self.sound_dispatch, done_cb=done_cb)
+        req = HelloSippyPlayRequest(self.id, text[0], speaker, soundout)
+        self.tts.infer(req)
+
+    def stop(self):
+        pass
+
+    def __del__(self):
+        if self.debug:
+            print('TTSSession.__del__')
