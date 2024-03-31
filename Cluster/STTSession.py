@@ -1,4 +1,5 @@
 from uuid import uuid4, UUID
+from fractions import Fraction
 
 import torch
 
@@ -12,9 +13,11 @@ class STTRequest():
 class STTResult():
     text: str
     no_speech_prob: float
-    def __init__(self, text:str, no_speech_prob:float):
+    duration: Fraction
+    def __init__(self, text:str, no_speech_prob:float, duration:Fraction):
         self.text = text
         self.no_speech_prob = no_speech_prob
+        self.duration = duration
 
 class STTSession():
     debug = False

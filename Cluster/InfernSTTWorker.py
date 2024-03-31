@@ -1,6 +1,7 @@
 from typing import Tuple, List
 from os.path import expanduser, exists as path_exists
 from subprocess import Popen, PIPE
+from fractions import Fraction
 
 import ctranslate2
 import transformers
@@ -40,7 +41,8 @@ class InfernSTTWorker(InfernBatchedWorker):
         good_results = [(wi, self.processor.decode(r.sequences_ids[0]), r.no_speech_prob)
                             for wi, r in zip(wis, results)]
         for wi, r, nsp in good_results:
-            wi.text_cb(result = STTResult(text=r, no_speech_prob=nsp))
+            duration = Fraction(len(wi.audio), self.sample_rate)
+            wi.text_cb(result = STTResult(text=r, no_speech_prob=nsp, duration=duration))
 
     @lru_cache(maxsize=16)
     def get_prompt(self, langs:Tuple[str]):
