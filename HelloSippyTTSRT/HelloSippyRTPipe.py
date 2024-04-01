@@ -338,7 +338,7 @@ class HelloSippyRTPipe:
         rv = self.speaker_embeddings[s_index]
         return rv
 
-    @lru_cache(maxsize=16)
+    #@lru_cache(maxsize=16)
     def get_voice(self, s_index:int):
         rv = self.speaker_embeddings[s_index]
         return rv
