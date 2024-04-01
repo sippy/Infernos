@@ -204,7 +204,7 @@ class WeakDispatcher():
     def __init__(self, queue:Queue): self.queue = weakref.ref(queue)
     def __call__(self, res):
         q = self.queue()
-        if q: q.put(res.numpy() if res else None)
+        if q: q.put(res.numpy() if res is not None else None)
 
 class InfernSession:
     _cmd_queue:Queue
@@ -227,10 +227,10 @@ class HelloSippyRTPipe:
     pre_nframes: int = 2
     post_nframes: int = 2
     model_sr: int = 16000
-    dispatch_sr: int = 16000
+    output_sr: int = 16000
     default_model = "microsoft/speecht5_tts"
 
-    def __init__(self, device, model=default_model, get_processor:Optional[callable]=None, **kwa):
+    def __init__(self, device, model=default_model, get_processor:Optional[callable]=None, output_sr:int=output_sr, **kwa):
         self.cuda_lock = InfernGlobals().torcher
         with self.cuda_lock:
             if get_processor is None:
@@ -259,10 +259,11 @@ class HelloSippyRTPipe:
             self.speaker_embeddings = [torch.tensor(ed["xvector"], device='cpu').unsqueeze(0)
                                         for ed in sorted(embeddings_dataset, key=lambda x: x['filename'])]
             for x in [_x for x in (self.model.parameters, self.vocoder.parameters, self.chunker.parameters) for _x in x()] + self.speaker_embeddings: x.requires_grad = False
-            if self.model_sr != self.dispatch_sr:
-                self.resampler = maybe_half(T.Resample(orig_freq=self.model_sr, new_freq=self.dispatch_sr)).to(device)
+            if self.model_sr != output_sr:
+                self.resampler = maybe_half(T.Resample(orig_freq=self.model_sr, new_freq=output_sr)).to(device)
             else:
                 self.resampler = None
+            self.output_sr = output_sr
 
     def infer(self, state:HelloSippyPipeStateBatched) -> None:
         with self.cuda_lock:
@@ -316,7 +317,7 @@ class HelloSippyRTPipe:
             state.audio = self.resampler(audio) if self.resampler else audio
 
     def unbatch_and_dispatch(self, state:HelloSippyPipeStateBatched):
-        audio, sr_rr = state.audio, self.model_sr / self.dispatch_sr
+        audio, sr_rr = state.audio, self.model_sr / self.output_sr
         end_idx = state.idx - 1
         stepsize = int(256 * 2 / sr_rr)
         with self.cuda_lock:
@@ -347,6 +348,7 @@ class HelloSippyRTPipeTest(HelloSippyRTPipe):
     _sync_queue: Queue
     sessions: weakref.WeakValueDictionary[InfernSession]
     max_sessions: int = 50
+    output_sr = 8000
 
     def __init__(self, *a, **kwa):
         self._main_thread_id = threading.get_ident()

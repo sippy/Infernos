@@ -93,6 +93,7 @@ class TTSRTPOutput(threading.Thread):
     def consume_audio(self):
         itime = self.itime
         stime = ctime = None
+        in_sr = 8000
         out_sr = 8000
         out_ft = 30
         out_pt = 0 # G.711u
@@ -170,9 +171,10 @@ class TTSRTPOutput(threading.Thread):
             if stime is None:
                 stime = ctime
 
-            sz = chunk_o_n.size(0)
-            chunk_o_n = self.codec.resampler[0](chunk_o_n)
-            assert chunk_o_n.size(0) == sz / 2
+            if in_sr != out_sr:
+                sz = chunk_o_n.size(0)
+                chunk_o_n = self.codec.resampler[0](chunk_o_n)
+                assert chunk_o_n.size(0) == sz // (in_sr // out_sr)
             chunk_o = torch.cat((chunk_o, chunk_o_n), dim=0)
 
             etime = ctime - stime

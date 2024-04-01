@@ -18,8 +18,8 @@ class InfernTTSActor():
         super().__init__()
         self.sessions = {}
 
-    def start(self, lang:str='en'):
-        self.tts = InfernTTSWorker(lang)
+    def start(self, lang:str='en', output_sr:int=16000):
+        self.tts = InfernTTSWorker(lang, output_sr)
         self.tts.start()
 
     def stop(self):
