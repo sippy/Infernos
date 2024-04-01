@@ -81,8 +81,8 @@ if __name__ == '__main__':
     else:
         lfile = open(logfile, 'a')
 
+    default_resources = InfernSIPActor.default_resources
     try:
-        default_resources = {'head':1, 'stt': 1, 'tts':1, 'rtp': 1};
         ray.init(num_gpus=1, resources = default_resources)
     except ValueError as ex:
         if str(ex).index('connecting to an existing cluster') < 0: raise ex

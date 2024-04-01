@@ -7,9 +7,10 @@ from Cluster.InfernTTSActor import InfernTTSActor
 from Cluster.InfernSTTActor import InfernSTTActor
 from Cluster.InfernRTPActor import InfernRTPActor
 
-@ray.remote
+@ray.remote(resources={"head": 1})
 class InfernSIPActor():
     sip_stack: InfernSIP
+    default_resources = {'head':1, 'stt': 1, 'tts':1, 'rtp': 1}
     def __init__(self, iao):
         self.iao = iao
 

@@ -113,14 +113,15 @@ class TestSession():
 
 @ray.remote(resources={"head": 1})
 class InfernBenchActor():
+    default_resources = {'head':1, 'stt': 3, 'tts':3}
     queue: Queue
     sessions: Dict[int, TestSession]
     def __init__(self, _): pass
 
     def loop(self):
         lang = 'de'
-        tts_actrs = tuple(InfernTTSActor.remote() for _ in range(3))
-        stt_actrs = tuple(InfernSTTActor.remote() for _ in range(3))
+        tts_actrs = tuple(InfernTTSActor.remote() for _ in range(self.default_resources['tts']))
+        stt_actrs = tuple(InfernSTTActor.remote() for _ in range(self.default_resources['stt']))
         fut = tuple(x.start.remote() for x in stt_actrs)
         fut += tuple(x.start.remote(lang) for x in tts_actrs)
         _prompts = [y for x in smith_set() + bender_set() + hal_set() for y in x.split('|')]
