@@ -1,15 +1,17 @@
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Any
 from queue import Queue
 from uuid import UUID, uuid4
 from functools import partial
 from fractions import Fraction
 import pickle
 import gzip
+from time import monotonic
 
 import ray
 import torch
 from transformers import AutoTokenizer, AutoModel
 from scipy.spatial.distance import cosine
+from tensorboardX import SummaryWriter
 
 from Cluster.InfernTTSActor import InfernTTSActor
 from Cluster.InfernSTTActor import InfernSTTActor
@@ -28,10 +30,12 @@ class SoundPreBatcher():
     audio: Optional[torch.Tensor] = None
     deliver: callable
     stt_done: callable
+    tts_done: callable
     lang: str
-    def __init__(self, deliver, stt_done:callable, lang:str):
+    def __init__(self, deliver, stt_done:callable, tts_done:callable, lang:str):
         self.deliver = deliver
         self.stt_done = stt_done
+        self.tts_done = tts_done
         self.lang = lang
 
     def __call__(self, chunk):
@@ -41,19 +45,21 @@ class SoundPreBatcher():
             self.audio = audio
             #print(f'audio: {ts.audio.size()=}')
         else:
+            self.tts_done()
             self.deliver(STTRequest(torch.cat(self.audio).numpy(), self.stt_done, self.lang))
             self.audio = None
         return (0, False)
 
 class TestPipe():
     id: UUID
-    def __init__(self, tts_actr, stt_actr, stt_done, lang):
+    def __init__(self, tts_actr, stt_actr, bench_actr, lang):
         self.id = uuid4()
         self.tts_sess = ray.get(tts_actr.new_tts_session.remote())
-        stt_done = partial(stt_done, session_id=self.id)
+        stt_done = partial(bench_actr.stt_done.remote, session_id=self.id)
+        tts_done = partial(bench_actr.tts_done.remote, tts_actr=tts_actr, session_id=self.id)
         self.stt_sess = ray.get(stt_actr.new_stt_session.remote())
         self.stt_soundin = partial(stt_actr.stt_session_soundin.remote, self.stt_sess)
-        tts_soundout = SoundPreBatcher(self.stt_soundin, stt_done, lang)
+        tts_soundout = SoundPreBatcher(self.stt_soundin, stt_done, tts_done, lang)
         ray.get(tts_actr.tts_session_start.remote(self.tts_sess, tts_soundout))
         self.tts_say = partial(tts_actr.tts_session_say.remote, rgen_id=self.tts_sess)
         self.lang = lang
@@ -113,13 +119,14 @@ class TestSession():
 
 @ray.remote(resources={"head": 1})
 class InfernBenchActor():
-    default_resources = {'head':1, 'stt': 3, 'tts':3}
+    default_resources = {'head':1, 'stt': 2, 'tts':2}
     queue: Queue
     sessions: Dict[int, TestSession]
     def __init__(self, _): pass
 
     def loop(self):
-        lang = 'de'
+        self.writer = SummaryWriter()
+        lang = 'en'
         tts_actrs = tuple(InfernTTSActor.remote() for _ in range(self.default_resources['tts']))
         stt_actrs = tuple(InfernSTTActor.remote() for _ in range(self.default_resources['stt']))
         fut = tuple(x.start.remote() for x in stt_actrs)
@@ -142,7 +149,7 @@ class InfernBenchActor():
         res = []
         batch_size = 48 + 4
         target_nspeakers = 30
-        test_pipes = list(TestPipe(tts_actr(i), stt_actr(i), self_actor.stt_done.remote, lang)
+        test_pipes = list(TestPipe(tts_actr(i), stt_actr(i), self_actor, lang)
                           for i in range(batch_size))
         draining = False
         class _next_ts():
@@ -184,12 +191,17 @@ class InfernBenchActor():
                     draining = True
                     continue
                 self.sessions[tp.id] = ts
+                if ts.speaker_id > 2000:
+                    draining = True
             while len(test_pipes) == 0 or (draining and len(test_pipes) < batch_size):
-                if draining: print(f'Draining: {batch_size - len(test_pipes)} left')
+                if draining:
+                    print(f'Draining: {batch_size - len(test_pipes)} left')
                 ts = self.queue.get()
                 res.append(ts)
                 test_pipes.append(ts.test_pipe)
             if draining:
+                for t in tts_actrs: ray.get(t.stop.remote())
+                raise Exception("BP")
                 res.sort(key=lambda x: x.average_error())
                 if (len(res) / 2) <= target_nspeakers:
                     res = res[:target_nspeakers]
@@ -221,5 +233,27 @@ class InfernBenchActor():
             self.queue.put(ts)
         #if not self.sessions: self.stop()
 
+    ntts:Optional[Dict[ray.actor, int]] = None
+    frst_tts:Dict[ray.actor, float]
+    last_tts:Dict[ray.actor, float]
+
+    def tts_done(self, session_id, tts_actr, result:Optional[Any]=None):
+        tstp = monotonic()
+        if self.ntts is None:
+            self.ntts, self.last_tts, self.frst_tts = {}, {}, {}
+        if tts_actr not in self.ntts:
+            self.frst_tts[tts_actr] = self.last_tts[tts_actr] = tstp
+            self.ntts[tts_actr] = 1
+        else:
+            nact = tuple(self.ntts.keys()).index(tts_actr)
+            ival = tstp - self.frst_tts[tts_actr]
+            ntts = self.ntts[tts_actr]
+            sntts = sum(self.ntts.values())
+            self.writer.add_scalar(f'tts/rate_{nact}', ntts / ival, sntts)
+            self.writer.flush()
+            self.ntts[tts_actr] += 1
+        self.last_tts[tts_actr] = tstp
+
     def stop(self):
         self.queue.put(None)
+        self.writer.close()
