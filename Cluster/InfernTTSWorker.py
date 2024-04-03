@@ -5,6 +5,8 @@ except ModuleNotFoundError:
 
 from typing import List
 
+import torch
+
 from Cluster.InfernBatchedWorker import InfernBatchedWorker
 from HelloSippyTTSRT.HelloSippyRTPipe import HelloSippyRTPipe, HelloSippyPlayRequest, \
     HelloSippyPipeState, HelloSippyPipeStateBatched
@@ -29,15 +31,21 @@ lang2model = {'en': {},
               'ja': {'model': 'esnya/japanese_speecht5_tts', 'get_processor': get_ja_T5Processor},
              }
 
+def get_torch_hw():
+    if torch.cuda.is_available():
+        return 'cuda' 
+    if hasattr(torch, 'xpu') and torch.xpu.is_available():
+        return 'xpu'
+    raise AttributeError('Could not find CUDA deivces')
+
 class InfernTTSWorker(InfernBatchedWorker):
     max_batch_size: int = 8
-    device = 'cuda' if ipex is None else 'xpu'
     debug = False
     tts_engine: HelloSippyRTPipe
 
     def __init__(self, lang, output_sr):
         super().__init__()
-        tts_engine = HelloSippyRTPipe(self.device, output_sr=output_sr, **lang2model[lang])
+        tts_engine = HelloSippyRTPipe(get_torch_hw(), output_sr=output_sr, **lang2model[lang])
         if ipex is not None:
             self.model = ipex.optimize(tts_engine.model)
             self.vocoder = ipex.optimize(tts_engine.vocoder)
