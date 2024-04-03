@@ -1,6 +1,4 @@
-try:
-    import intel_extension_for_pytorch as ipex
-    ipex.enable_onednn_fusion(True)
+try: import intel_extension_for_pytorch as ipex
 except ModuleNotFoundError: ipex = None
 
 import sys, random, weakref, uuid
@@ -324,7 +322,7 @@ class HelloSippyRTPipe:
             for i, dispatch in [(i, _cbq) for i, _cbq in enumerate(state.dispatch) if _cbq is not None]:
                 startoff = max(0, (asize:=audio[i].size(0)) - ((state.idx - state.starts_at[i].item()) * stepsize))
                 endoff = min(asize, asize - (((state.idx - ends_at) * stepsize) if (ends_at:=state.ends_at[i].item()) >=0 else 0))
-                dispatch(audio[i][startoff:endoff].cpu())
+                dispatch(audio[i][startoff:endoff].to(torch.float16).cpu())
                 if ends_at >= 0 and ends_at <= end_idx:
                     dispatch(None)
                     state.dispatch[i] = None
