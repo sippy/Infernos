@@ -38,6 +38,7 @@ from sippy.SipReason import SipReason
 
 from Cluster.RemoteRTPGen import RemoteRTPGen, RTPGenError
 from Cluster.RemoteTTSSession import RemoteTTSSession, TTSSessionError
+from Cluster.STTSession import STTRequest
 
 ULAW_PT = 0
 ULAW_RM = 'PCMU/8000'
@@ -92,10 +93,9 @@ class InfernTTSUAS(UA):
 
     def __init__(self, sippy_c, sip_actr, tts_actr, stt_actr, rtp_actr, req, sip_t, prompts):
         self.id = uuid4()
-        self.sip_actr, self.rtp_actr = sip_actr, rtp_actr
+        self.sip_actr, self.rtp_actr, self.stt_actr = sip_actr, rtp_actr, stt_actr
         self._tsess = RemoteTTSSession(tts_actr)
-        text_cb = partial(sip_actr.sess_event.remote, sip_sess_id=self.id, event=CCEventSTTTextIn())
-        self.stt_sess_id = stt_actr.new_stt_session.remote(text_cb)
+        self.stt_sess_id = stt_actr.new_stt_session.remote()
         super().__init__(sippy_c, self.outEvent)
         assert sip_t.noack_cb is None
         sip_t.noack_cb = self.sess_term
@@ -118,6 +118,20 @@ class InfernTTSUAS(UA):
         sect = sects[0]
         return (sect.c_header.addr, sect.m_header.port)
 
+    class STTProxy():
+        debug = True
+        stt_do: callable
+        stt_done: callable
+        def __init__(self, stt_actr, stt_sess_id, stt_done):
+            self.stt_do = partial(stt_actr.stt_session_soundin.remote, sess_id=stt_sess_id)
+            self.stt_done = stt_done
+
+        def __call__(self, chunk):
+            if self.debug:
+                print(f'STTProxy.chunk_in {len(chunk)=}')
+            sreq = STTRequest(chunk, self.stt_done, 'en')
+            self.stt_do(req=sreq)
+
     def outEvent(self, event, ua):
         if isinstance(event, CCEventUpdate):
             sdp_body = event.getData()
@@ -132,8 +146,11 @@ class InfernTTSUAS(UA):
         cId, cli, cld, sdp_body, auth, caller_name = event.getData()
         rtp_target = self.extract_rtp_target(sdp_body)
         if rtp_target is None: return
+        self.stt_sess_id = ray.get(self.stt_sess_id)
+        text_cb = partial(self.sip_actr.sess_event.remote, sip_sess_id=self.id, event=CCEventSTTTextIn())
+        vad_handler = self.STTProxy(self.stt_actr, self.stt_sess_id, text_cb)
         try:
-            self.rsess = RemoteRTPGen(self.rtp_actr, ray.get(self.stt_sess_id), rtp_target)
+            self.rsess = RemoteRTPGen(self.rtp_actr, vad_handler, rtp_target)
             self._tsess.start(self.rsess.get_soundout())
         except RTPGenError as e:
             event = InfernUASFailure(code=500, reason=str(e))
@@ -181,8 +198,10 @@ class InfernTTSUAS(UA):
         if self._tsess is None:
             return
         self._tsess.end()
-        self._tsess = None
+        self.stt_actr.stt_session_end.remote(sess_id=self.stt_sess_id)
+        self.rsess.end()
         self.rsess.join()
+        self._tsess = None
         if ua != self:
             self.disconnect()
 

@@ -9,9 +9,9 @@ class RTPGenError(Exception):
     pass
 
 class RemoteRTPGen():
-    def __init__(self, rtp_actr, stt_sess_id, target):
+    def __init__(self, rtp_actr, vad_chunk_in:callable, target):
         self.rtp_actr = rtp_actr
-        try: self.sess_id, self.rtp_address = ray.get(rtp_actr.new_rtp_session.remote(target, stt_sess_id))
+        try: self.sess_id, self.rtp_address = ray.get(rtp_actr.new_rtp_session.remote(target, vad_chunk_in))
         except RayTaskError as e: raise RTPGenError("new_rtp_session() failed") from e
 
     def update(self, target):
@@ -21,7 +21,7 @@ class RemoteRTPGen():
         return partial(self.rtp_actr.rtp_session_soundout.remote, rtp_id=self.sess_id)
 
     def end(self):
-        return ray.get(self.rtp_actr.rtp_session_end.remote(self.sess_id))
+        return self.rtp_actr.rtp_session_end.remote(self.sess_id)
 
     def join(self):
         return ray.get(self.rtp_actr.rtp_session_join.remote(self.sess_id))

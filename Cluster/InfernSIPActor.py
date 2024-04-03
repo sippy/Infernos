@@ -18,7 +18,7 @@ class InfernSIPActor():
         from sippy.Core.EventDispatcher import ED2
         ED2.my_ident = get_ident()
         stt_actr = InfernSTTActor.remote()
-        rtp_actr = InfernRTPActor.options(max_concurrency=2).remote(stt_actr)
+        rtp_actr = InfernRTPActor.options(max_concurrency=2).remote()
         sip_actr = ray.get_runtime_context().current_actor
         tts_actr = InfernTTSActor.remote()
         ray.get(stt_actr.start.remote())

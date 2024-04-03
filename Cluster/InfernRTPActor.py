@@ -25,17 +25,15 @@ class InfernRTPEPoint():
     firstframe = True
     rtp_target: Tuple[str, int]
     rtp_target_lock: Lock
-    def __init__(self, rtp_target:Tuple[str, int], stt_actr, stt_sess_id, ring):
+    def __init__(self, rtp_target:Tuple[str, int], vad_chunk_in:callable, ring):
         self.id = uuid4()
         assert isinstance(rtp_target, tuple) and len(rtp_target) == 2
         self.rtp_target = rtp_target
         self.rtp_target_lock = Lock()
-        self.stt_sess_id = stt_sess_id
-        self.stt_actr = stt_actr
         for dev in self.devs:
             try:
                 self.writer = TTSRTPOutput(0, dev)
-                self.rsess = RTPInStream(ring, self.chunk_in, dev)
+                self.rsess = RTPInStream(ring, vad_chunk_in, dev)
             except RuntimeError:
                 if dev == self.devs[-1]: raise
             else: break
@@ -72,16 +70,10 @@ class InfernRTPEPoint():
         self.writer.join()
         self.rserv.shutdown()
         self.rserv, self.writer = (None, None)
-        self.stt_actr.stt_session_end.remote(sess_id=self.stt_sess_id)
 
     def __del__(self):
         if self.debug:
             print('InfernRTPEPoint.__del__')
-
-    def chunk_in(self, chunk):
-        if self.debug:
-            print(f'InfernRTPEPoint.chunk_in {self.stt_actr.stt_session_soundin=} {self.stt_actr.stt_session_soundin.remote=} {self.stt_sess_id=}')
-        self.stt_actr.stt_session_soundin.remote(sess_id=self.stt_sess_id, chunk=chunk)
 
     def soundout(self, chunk, stdtss):
         ismark = isinstance(chunk, TTSSMarkerGeneric)
@@ -99,16 +91,15 @@ class InfernRTPActor():
     device = 'cpu'
     sessions: Dict[UUID, InfernRTPEPoint]
     ring: InfernRTPIngest
-    def __init__(self, stt_actr):
+    def __init__(self):
         self.sessions = {}
-        self.stt_actr = stt_actr
 
     def stdtss(self):
         return f'{monotonic():4.3f}'
 
-    def new_rtp_session(self, rtp_target, stt_sess_id):
+    def new_rtp_session(self, rtp_target, vad_chunk_in:callable):
         print(f'{self.stdtss()}: new_rtp_session')
-        rep = InfernRTPEPoint(rtp_target, self.stt_actr, stt_sess_id, self.ring)
+        rep = InfernRTPEPoint(rtp_target, vad_chunk_in, self.ring)
         self.sessions[rep.id] = rep
         return (rep.id, rep.rserv.uopts.laddress)
 
