@@ -315,14 +315,16 @@ class HelloSippyRTPipe:
             state.audio = self.resampler(audio) if self.resampler else audio
 
     def unbatch_and_dispatch(self, state:HelloSippyPipeStateBatched):
-        audio, sr_rr = state.audio, self.model_sr / self.output_sr
+        audio, sr_rr = state.audio, self.model_sr // self.output_sr
         end_idx = state.idx - 1
-        stepsize = int(256 * 2 / sr_rr)
+        stepsize = 256 * 2 // sr_rr
         with self.cuda_lock:
             for i, dispatch in [(i, _cbq) for i, _cbq in enumerate(state.dispatch) if _cbq is not None]:
                 startoff = max(0, (asize:=audio[i].size(0)) - ((state.idx - state.starts_at[i].item()) * stepsize))
                 endoff = min(asize, asize - (((state.idx - ends_at) * stepsize) if (ends_at:=state.ends_at[i].item()) >=0 else 0))
-                dispatch(audio[i][startoff:endoff].to(torch.float16).cpu())
+                assert startoff <= endoff
+                if startoff != endoff:
+                    dispatch(audio[i][startoff:endoff].to(torch.float16).cpu())
                 if ends_at >= 0 and ends_at <= end_idx:
                     dispatch(None)
                     state.dispatch[i] = None
