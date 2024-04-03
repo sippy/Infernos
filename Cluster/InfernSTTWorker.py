@@ -49,7 +49,7 @@ class InfernSTTWorker(InfernBatchedWorker):
                 features = ctranslate2.StorageView.from_array(inputs.input_features[i:i+1])
                 results.extend(self.model.generate(features, prompt[i:i+1], return_no_speech_prob=True))
         print(f'{results[0].sequences_ids[0][0]=}')
-        good_results = [(wi, self.processor.decode(r.sequences_ids[0]), r.no_speech_prob)
+        good_results = [(wi, self.processor.decode(r.sequences_ids[0], skip_special_tokens=True), r.no_speech_prob)
                             for wi, r in zip(wis, results)]
         for wi, r, nsp in good_results:
             duration = Fraction(len(wi.audio), self.sample_rate)
