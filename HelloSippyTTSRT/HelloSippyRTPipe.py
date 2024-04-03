@@ -336,7 +336,7 @@ class HelloSippyRTPipe:
     def get_rand_voice(self):
         s_index = torch.randint(0, len(self.speaker_embeddings), (1,)).item()
         rv = self.speaker_embeddings[s_index]
-        return rv
+        return (rv, s_index)
 
     #@lru_cache(maxsize=16)
     def get_voice(self, s_index:int):
@@ -359,7 +359,7 @@ class HelloSippyRTPipeTest(HelloSippyRTPipe):
     def alloc_session(self, speaker:Optional[torch.Tensor]=None) -> Tuple[InfernSession, HelloSippyPipeState]:
         assert threading.get_ident() == self._main_thread_id
         if len(self.sessions) >= self.max_sessions: raise ErrMaxSessReached(f'No more sessions available {self.max_sessions=}')
-        if not speaker: speaker = self.get_rand_voice()
+        if not speaker: speaker = self.get_rand_voice()[0]
         rv = InfernSession(self._sync_queue, speaker)
         self.sessions[rv.id] = rv
         ss = SessSyncCmd(self.sessions)

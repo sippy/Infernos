@@ -142,7 +142,10 @@ class TTSSession2():
     def say(self, text, speaker_id, done_cb:Optional[callable]):
         if self.debug:
             print(f'{monotonic():4.3f}: TTSSession.say: ${text=}, {speaker_id=}, {done_cb=}')
-        speaker = self.tts.get_rand_voice() if speaker_id is None else self.tts.get_voice(speaker_id)
+        if speaker_id is not None:
+            speaker = self.tts.get_voice(speaker_id)
+        else:
+            speaker, speaker_id = self.tts.get_rand_voice()
         text = text.split('|', 1)
         if len(text) > 1:
             done_cb = partial(self.say, text=text[1], speaker_id=speaker_id, done_cb=done_cb)
