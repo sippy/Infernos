@@ -56,9 +56,10 @@ class InfernSIP(object):
     stt_actr = None
     sippy_c = None
     sessions: WeakValueDictionary
-    lang = 'en'
+    tts_lang: str
+    stt_lang: str
 
-    def __init__(self, sip_actr, tts_actr, stt_actr, rtp_actr, iao):
+    def __init__(self, sip_actr, tts_actr, stt_actr, rtp_actr, iao, tts_lang, stt_lang):
         self.sippy_c = {'nh_addr':tuple(iao.nh_addr),
                         '_sip_address':iao.laddr,
                         '_sip_port':iao.lport,
@@ -82,9 +83,10 @@ class InfernSIP(object):
         ragent.rmsg.getHFBody('to').getUrl().username = iao.cld
         prompts = ['Welcome to Infernos.'] + bender_set(2) + \
                    smith_set() + hal_set() #+ t900_set()
-        if self.lang != 'en':
-            tr = Translator('en', self.lang)
+        if tts_lang != 'en':
+            tr = Translator('en', tts_lang)
             prompts = [tr.translate(p) for p in prompts]
+        self.tts_lang, self.stt_lang = tts_lang, stt_lang
         self.prompts = prompts
         ragent.doregister()
 
@@ -96,8 +98,7 @@ class InfernSIP(object):
             #if self.rserv != None:
             #    return (req.genResponse(486, 'Busy Here'), None, None)
             # New dialog
-            isess = InfernTTSUAS(self.sippy_c, self.sip_actr, self.tts_actr, self.stt_actr,
-                                 self.rtp_actr, self.lang, self.getPrompts(), req, sip_t)
+            isess = InfernTTSUAS(self, req, sip_t)
             self.sessions[isess.id] = isess
             return
         return (req.genResponse(501, 'Not Implemented'), None, None)

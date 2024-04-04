@@ -23,7 +23,8 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 # SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-from functools import partial
+from typing import Optional
+from functools import partial, lru_cache
 
 import ray
 
@@ -33,33 +34,59 @@ from Cluster.RemoteRTPGen import RemoteRTPGen, RTPGenError
 from Cluster.RemoteTTSSession import RemoteTTSSession
 from Cluster.STTSession import STTRequest
 from SIP.InfernUA import InfernUA, model_body, InfernUASFailure
+from Core.T2T.Translator import Translator
 
 class CCEventSentDone: pass
 class CCEventSTTTextIn: pass
 
+import pickle
+import gzip
+from random import choice
+
+@lru_cache(maxsize=4)
+def get_top_speakers(lang:str):
+    skips = 0
+    i = 0
+    res = []
+    while True:
+        try:
+            with gzip.open(f'checkpoint/{lang}/speaker.{i}.{lang}.pkl.gz', 'rb') as file:
+                res.append(pickle.load(file))
+        except FileNotFoundError:
+            skips += 1
+            if skips > 200: break
+        i += 1
+    if len(res) == 0:
+        return None
+    gen = max(r.nres for r in res)
+    return tuple(r.speaker_id for r in res if r.nres == gen)
+
 class InfernTTSUAS(InfernUA):
-    lang: str
+    stt_lang: str
     prompts = None
     autoplay = True
     _tsess: RemoteTTSSession = None
-    def __init__(self, sippy_c, sip_actr, tts_actr, stt_actr, rtp_actr, lang,
-                 prompts, req, sip_t):
-        super().__init__(sippy_c, sip_actr, rtp_actr)
-        self._tsess = RemoteTTSSession(tts_actr)
-        self.stt_actr, self.stt_sess_id = stt_actr, stt_actr.new_stt_session.remote()
-        self.lang = lang
+    translator: Optional[Translator] = None
+    def __init__(self, isip, req, sip_t):
+        super().__init__(isip.sippy_c, isip.sip_actr, isip.rtp_actr)
+        self._tsess = RemoteTTSSession(isip.tts_actr)
+        self.stt_actr, self.stt_sess_id = isip.stt_actr, isip.stt_actr.new_stt_session.remote()
+        self.stt_lang = isip.stt_lang
         assert sip_t.noack_cb is None
         sip_t.noack_cb = self.sess_term
-        self.prompts = prompts
+        self.prompts = isip.getPrompts()
+        self.speakers = get_top_speakers(isip.tts_lang)
+        if isip.tts_lang != isip.stt_lang:
+            self.translator = Translator(isip.stt_lang, isip.tts_lang)
         self.recvRequest(req, sip_t)
 
     class STTProxy():
         debug = True
         stt_do: callable
         stt_done: callable
-        def __init__(self, stt_actr, stt_sess_id, lang, stt_done):
-            self.stt_do = partial(stt_actr.stt_session_soundin.remote, sess_id=stt_sess_id)
-            self.lang, self.stt_done = lang, stt_done
+        def __init__(self, uas, stt_done):
+            self.stt_do = partial(uas.stt_actr.stt_session_soundin.remote, sess_id=uas.stt_sess_id)
+            self.lang, self.stt_done = uas.stt_lang, stt_done
 
         def __call__(self, chunk):
             if self.debug:
@@ -76,7 +103,7 @@ class InfernTTSUAS(InfernUA):
         if rtp_target is None: return
         self.stt_sess_id = ray.get(self.stt_sess_id)
         text_cb = partial(self.sip_actr.sess_event.remote, sip_sess_id=self.id, event=CCEventSTTTextIn())
-        vad_handler = self.STTProxy(self.stt_actr, self.stt_sess_id, self.lang, text_cb)
+        vad_handler = self.STTProxy(self, text_cb)
         try:
             self.rsess = RemoteRTPGen(self.rtp_actr, vad_handler, rtp_target)
             self._tsess.start(self.rsess.get_soundout())
@@ -99,11 +126,13 @@ class InfernTTSUAS(InfernUA):
             nsp = res.no_speech_prob
             if nsp > 0.3: return
             print(f'STT: -> "{res.text} {res.no_speech_prob}"')
-            if res.text.strip() == "Let's talk.":
+            text = res.text if  self.translator is None else self.translator.translate(res.text)
+            if any(t.strip() == "Let's talk." for t in (res.text, text)):
                 self.autoplay = False
             if self.autoplay:
                 return
-            self._tsess.say(res.text)
+            speaker_id=None if self.speakers is None else choice(self.speakers)
+            self._tsess.say(text, speaker_id=speaker_id)
             return
         if isinstance(event, CCEventSentDone):
             if not self.autoplay:
