@@ -76,10 +76,16 @@ class RTPInStream():
 class InfernRTPIngest(InfernWrkThread):
     debug = True
     pkt_queue: Queue[Union[WIPkt,WIStreamUpdate]]
+    _start_queue: Queue[int]
     def __init__(self):
         super().__init__()
         self.pkt_queue = Queue()
-#        self.start()
+
+    def start(self):
+        self._start_queue = Queue()
+        super().start()
+        self._start_queue.get()
+        del self._start_queue
 
     def dprint(self, *args):
         if self.debug:
@@ -87,6 +93,7 @@ class InfernRTPIngest(InfernWrkThread):
 
     def run(self):
         super().thread_started()
+        self._start_queue.put(0)
         self.dprint("InfernRTPIngest started")
         data, address, rtime = (None, None, None)
         while self.get_state() == RTPWrkTRun:

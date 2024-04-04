@@ -123,10 +123,12 @@ class InfernRTPActor():
         rep = self.sessions[rtp_id]
         rep.update(rtp_target)
 
-    def loop(self):
-        from sippy.Core.EventDispatcher import ED2
+    def start(self):
         self.ring = InfernRTPIngest()
         self.ring.start()
+
+    def loop(self):
+        from sippy.Core.EventDispatcher import ED2
         ED2.my_ident = get_ident()
         rval = ED2.loop()
         self.ring.stop()

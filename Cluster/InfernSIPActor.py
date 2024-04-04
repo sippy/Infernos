@@ -21,8 +21,9 @@ class InfernSIPActor():
         rtp_actr = InfernRTPActor.options(max_concurrency=2).remote()
         sip_actr = ray.get_runtime_context().current_actor
         tts_actr = InfernTTSActor.remote()
-        ray.get(stt_actr.start.remote())
-        ray.get(tts_actr.start.remote(output_sr=8000))
+        for fut in tuple(_a.start.remote(**_k) for _a, _k in ((stt_actr, {}),
+                         (tts_actr, {'output_sr':8000}), (rtp_actr, {}))):
+            ray.get(fut)
         self.sip_stack = InfernSIP(sip_actr, tts_actr, stt_actr, rtp_actr, self.iao)
         rtp_actr.loop.remote()
         rval = ED2.loop()
