@@ -1,7 +1,9 @@
-from typing import Optional, Tuple
+from typing import Tuple, Dict
 import torch
 import torchaudio.transforms as T
 import audioop
+
+from Core.AudioChunk import AudioChunk
 
 _pcm_to_ulaw_ct = torch.zeros(65536, dtype=torch.uint8)
 for i in range(-32768, 32768):
@@ -17,17 +19,14 @@ for i in range(256):
     pcm_value = int.from_bytes(pcm_data, 'little', signed=True)
     _ulaw_to_pcm_ct[i] = pcm_value
 
-class G711Codec:
+class G711Codec():
     default_sr:int = 8000
     pt:int = 0 # G.711u
-    resampler: Optional[Tuple[T.Resample]] = None
-    def __init__(self, sample_rate: int = default_sr):
-        if sample_rate != self.default_sr:
-            self.resampler = (T.Resample(orig_freq=sample_rate, new_freq=self.default_sr),
-                              T.Resample(orig_freq=self.default_sr, new_freq=sample_rate))
+    resamplers: Dict[Tuple[int, int], T.Resample]
+    def __init__(self):
+        self.resamplers = {}
 
-    def encode(self, audio_tensor: torch.Tensor, resample: bool = True):
-        if resample and self.resampler: audio_tensor = self.resampler[0](audio_tensor)
+    def encode(self, audio_tensor:torch.Tensor):
         # Scale from [-1, 1] to [-32768, 32767]
         audio_scaled = torch.clamp(audio_tensor * 32767.0, -32768, 32767).to(torch.int16)
 
@@ -36,7 +35,7 @@ class G711Codec:
 
         return audio_ulaw
 
-    def decode(self, ulaw_bytes: bytes, resample: bool = True):
+    def decode(self, ulaw_bytes:bytes, resample:bool=True, sample_rate:int=default_sr):
         # Convert byte string to a tensor of uint8
         ulaw_tensor = torch.tensor(list(ulaw_bytes), dtype=torch.uint8)
 
@@ -46,9 +45,17 @@ class G711Codec:
         # Scale from [-32768, 32767] to [-1, 1]
         audio_float = audio_pcm.float() / 32767.0
 
-        if resample and self.resampler: audio_float = self.resampler[1](audio_float)
+        if resample and sample_rate != self.default_sr:
+            resampler = self.get_resampler(self.default_sr, sample_rate)
+            return AudioChunk(resampler(audio_float), sample_rate)
+        return AudioChunk(audio_float, self.default_sr)
 
-        return audio_float
+    def get_resampler(self, from_sr:int, to_sr:int):
+        key = (from_sr, to_sr)
+        if (resampler:=self.resamplers.get(key, None)) is None:
+            resampler = T.Resample(orig_freq=from_sr, new_freq=to_sr)
+            self.resamplers[key] = resampler
+        return resampler
 
     def device(self):
         global _pcm_to_ulaw_ct, _ulaw_to_pcm_ct
@@ -60,5 +67,5 @@ class G711Codec:
         assert _pcm_to_ulaw_ct.device == _ulaw_to_pcm_ct.device
         _pcm_to_ulaw_ct = _pcm_to_ulaw_ct.to(device)
         _ulaw_to_pcm_ct = _ulaw_to_pcm_ct.to(device)
-        self.resampler = (self.resampler[0].to(device), self.resampler[1].to(device)) if self.resampler else None
+        self.resamplers = dict((k, v.to(device)) for k, v in self.resamplers.items())
         return self

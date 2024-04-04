@@ -103,7 +103,7 @@ class TTSSession(InfernWrkThread):
 
 from functools import partial
 from HelloSippyTTSRT.HelloSippyRTPipe import HelloSippyPlayRequest
-from RTP.RTPOutputWorker import AudioChunk
+from Core.AudioChunk import AudioChunk
 from Cluster.InfernTTSWorker import InfernTTSWorker
 
 class TTSSession2():

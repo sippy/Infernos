@@ -7,7 +7,6 @@ from rtpsynth.RtpJBuf import RtpJBuf, RTPFrameType, RTPParseError
 from Core.InfernWrkThread import InfernWrkThread, RTPWrkTRun
 from Core.VAD.ZlibVAD import ZlibVAD
 from Core.Codecs.G711 import G711Codec
-from RTP.RTPOutputWorker import AudioChunk
 
 class WIPkt():
     def __init__(self, stream: 'RTPInStream', data, address, rtime):
@@ -31,7 +30,7 @@ class RTPInStream():
     def __init__(self, ring:'InfernRTPIngest', chunk_in, device:str):
         self.jbuf = RtpJBuf(self.jb_size)
         self.vad = ZlibVAD(self.input_sr)
-        self.codec = G711Codec(self.output_sr).to(device)
+        self.codec = G711Codec().to(device)
         self.ring = ring
         self.chunk_in = chunk_in
 
@@ -70,9 +69,9 @@ class RTPInStream():
                 dprint(f"{len(pkt.rtp_data)=}, {type(pkt.rtp_data)=}")
             out = self.vad.ingest(pkt.rtp_data)
             if out is None: continue
-            chunk = self.codec.decode(out.chunk, resample=True)
-            dprint(f"active chunk: {len(chunk)=}")
-            self.chunk_in(AudioChunk(chunk, self.output_sr))
+            chunk = self.codec.decode(out.chunk, resample=True, sample_rate=self.output_sr)
+            dprint(f"active chunk: {len(chunk.audio)=}")
+            self.chunk_in(chunk)
         if self.npkts < 10 and len(res) > 0:
             dprint(f"{res=}")
 

@@ -9,6 +9,7 @@ import torch
 import soundfile as sf
 
 from Core.Codecs.G711 import G711Codec
+from Core.AudioChunk import AudioChunk
 
 class TTSSMarkerGeneric():
     track_id: int = 0
@@ -30,15 +31,6 @@ class TTSSMarkerSentDoneCB(TTSSMarkerNewSent):
         print(f'{monotonic():4.3f}: TTSSMarkerSentDoneCB.on_proc')
         x = self.done_cb()
         if self.sync: ray.get(x)
-
-class AudioChunk():
-    samplerate: int
-    audio:torch.Tensor
-    track_id: int = 0
-    def __init__(self, audio:torch.Tensor, samplerate:int):
-        assert isinstance(audio, torch.Tensor)
-        self.audio = audio
-        self.samplerate = samplerate
 
 class RTPOutputStream():
     ptime: float = 0.0
@@ -115,19 +107,17 @@ class RTPOutputWorker(threading.Thread):
     frames_prcsd = 0
     has_ended = False
     codec: G711Codec
-    samplerate_in: int
     samplerate_out: int = G711Codec.default_sr
     out_ft: int = 30 # ms
 
-    def __init__(self, device, samplerate_in=G711Codec.default_sr):
+    def __init__(self, device):
         self.itime = monotonic()
         self.device = device
         #if os.path.exists(self.ofname):
         #    self.data, _ = sf.read(self.ofname)
         self.data_queue = queue.Queue()
-        self.codec = G711Codec(samplerate_in).to(device)
+        self.codec = G711Codec().to(device)
         self.state_lock = threading.Lock()
-        self.samplerate_in = samplerate_in
         super().__init__(target=self.consume_audio)
         self.daemon = True
 
@@ -169,7 +159,6 @@ class RTPOutputWorker(threading.Thread):
         if self.debug and not ismark:
             print(f'len(chunk) = {len(chunk.audio)}')
         if not ismark:
-            assert chunk.samplerate == self.samplerate_in
             chunk.audio = chunk.audio.to(self.device)
         self.data_queue.put(chunk)
         if iseos:
@@ -199,21 +188,25 @@ class RTPOutputWorker(threading.Thread):
             self.update_frm_ctrs(rcvd_inc=chunk_n.audio.size(0))
             pos.ctime = monotonic()
 
+            if chunk_n.samplerate != self.samplerate_out:
+                sz = chunk_n.audio.size(0)
+                resampler = self.codec.get_resampler(chunk_n.samplerate, self.samplerate_out)
+                chunk_n.audio = resampler(chunk_n.audio)
+                assert chunk_n.audio.size(0) == sz // (chunk_n.samplerate // self.samplerate_out)
+                chunk_n.samplerate = self.samplerate_out
+
             if self.dl_ofname is not None:
                 a = chunk_n.audio
                 if self.data_log is None:
                     self.data_log = a
                 else:
                     self.data_log = torch.cat((self.data_log, a))
+
             chunk_o_n, explain = pos.chunk_in(chunk_n, self)
             if chunk_o_n is None:
                 if self.debug: print(f'consume_audio({explain}')
                 continue
 
-            if self.samplerate_in != self.samplerate_out:
-                sz = chunk_o_n.size(0)
-                chunk_o_n = self.codec.resampler[0](chunk_o_n)
-                assert chunk_o_n.size(0) == sz // (self.samplerate_in // self.samplerate_out)
             pos.chunk_o = torch.cat((pos.chunk_o, chunk_o_n), dim=0)
 
             etime = pos.ctime - pos.stime
@@ -231,7 +224,7 @@ class RTPOutputWorker(threading.Thread):
                 #print(packet.size())
                 #packet = (packet * 20000).to(torch.int16)
                 #packet = packet.byte().cpu().numpy()
-                packet = self.codec.encode(packet, resample=False).cpu().numpy()
+                packet = self.codec.encode(packet).cpu().numpy()
                 #print('packet', packet.min(), packet.max(), packet[:10])
                 packet = packet.tobytes()
                 #print(len(packet), packet[:10])
@@ -260,4 +253,4 @@ class RTPOutputWorker(threading.Thread):
         amplification_dB = 20.0
         data = self.data_log #* (10 ** (amplification_dB / 20))
         sf.write(self.dl_ofname, data.detach().cpu().numpy(),
-                 samplerate=self.samplerate_in)
+                 samplerate=self.samplerate_out)
