@@ -13,13 +13,13 @@ class TTSSMarkerGeneric():
     pass
 
 class TTSSMarkerNewSent(TTSSMarkerGeneric):
-    # This runs in the context of the TTSRTPOutput thread
+    # This runs in the context of the RTPOutputWorker thread
     def on_proc(self, tro_self, *args): pass
 
 class TTSSMarkerEnd(TTSSMarkerGeneric):
     pass
 
-class TTSRTPOutput(threading.Thread):
+class RTPOutputWorker(threading.Thread):
     debug = True
     pre_frames = 2
     _frame_size = 256
@@ -216,7 +216,7 @@ class TTSRTPOutput(threading.Thread):
 
     def __del__(self):
         if self.debug:
-            print('TTSRTPOutput.__del__')
+            print('RTPOutputWorker.__del__')
         #self.worker_thread.join()
         if self.data_log is None:
             return

@@ -30,7 +30,7 @@ from queue import Queue
 
 import ray
 
-from TTSRTPOutput import TTSSMarkerEnd, TTSSMarkerNewSent, TTSSMarkerGeneric
+from RTP.RTPOutputWorker import TTSSMarkerEnd, TTSSMarkerNewSent, TTSSMarkerGeneric
 from Core.InfernWrkThread import InfernWrkThread, RTPWrkTStop, RTPWrkTInit
 
 class TTSSMarkerSentDoneCB(TTSSMarkerNewSent):

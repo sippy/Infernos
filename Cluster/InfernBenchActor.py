@@ -17,7 +17,7 @@ from Cluster.InfernTTSActor import InfernTTSActor
 from Cluster.InfernSTTActor import InfernSTTActor
 from Cluster.STTSession import STTRequest, STTResult
 from Core.T2T.Translator import Translator
-from TTSRTPOutput import TTSSMarkerNewSent, TTSSMarkerEnd
+from RTP.RTPOutputWorker import TTSSMarkerNewSent
 
 from utils.tts import smith_set, bender_set, hal_set
 

@@ -3,8 +3,6 @@ from functools import partial
 import ray
 from ray.exceptions import RayTaskError
 
-from TTSRTPOutput import TTSSMarkerGeneric
-
 class RTPGenError(Exception):
     pass
 

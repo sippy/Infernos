@@ -12,7 +12,7 @@ from ray import ray
 from sippy.Udp_server import Udp_server, Udp_server_opts
 from sippy.misc import local4remote
 
-from TTSRTPOutput import TTSRTPOutput,  TTSSMarkerGeneric, TTSSMarkerNewSent
+from RTP.RTPOutputWorker import RTPOutputWorker,  TTSSMarkerGeneric, TTSSMarkerNewSent
 from SIP.InfernRTPIngest import InfernRTPIngest, RTPInStream
 
 
@@ -32,7 +32,7 @@ class InfernRTPEPoint():
         self.rtp_target_lock = Lock()
         for dev in self.devs:
             try:
-                self.writer = TTSRTPOutput(0, dev)
+                self.writer = RTPOutputWorker(0, dev)
                 self.rsess = RTPInStream(ring, vad_chunk_in, dev)
             except RuntimeError:
                 if dev == self.devs[-1]: raise
