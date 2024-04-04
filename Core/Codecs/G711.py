@@ -19,6 +19,7 @@ for i in range(256):
 
 class G711Codec:
     default_sr:int = 8000
+    pt:int = 0 # G.711u
     resampler: Optional[Tuple[T.Resample]] = None
     def __init__(self, sample_rate: int = default_sr):
         if sample_rate != self.default_sr:
