@@ -53,6 +53,8 @@ class InfernSTTWorker(InfernBatchedWorker):
                             for wi, r in zip(wis, results)]
         for wi, r, nsp in good_results:
             duration = Fraction(len(wi.audio), self.sample_rate)
+            # Remove leading and trailing space: "WhitespaceTokenizer adds a space at the beginning?" (copilot)
+            if len(r) > 0 and r[0] == ' ': r = r[1:]
             wi.text_cb(result = STTResult(text=r, no_speech_prob=nsp, duration=duration))
 
     @lru_cache(maxsize=16)
