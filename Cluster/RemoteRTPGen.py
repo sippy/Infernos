@@ -18,6 +18,9 @@ class RemoteRTPGen():
     def get_soundout(self) -> callable:
         return partial(self.rtp_actr.rtp_session_soundout.remote, rtp_id=self.sess_id)
 
+    def soundout(self, chunk):
+        self.rtp_actr.rtp_session_soundout.remote(rtp_id=self.sess_id, chunk=chunk)
+
     def end(self):
         return self.rtp_actr.rtp_session_end.remote(self.sess_id)
 
