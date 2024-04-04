@@ -74,6 +74,4 @@ class InfernRTPEPoint():
             self.firstframe = False
         if ismark and isinstance(chunk, TTSSMarkerNewSent):
             self.firstframe = True
-        if not ismark:
-            chunk = chunk.to(self.writer.device)
         return self.writer.soundout(chunk)
