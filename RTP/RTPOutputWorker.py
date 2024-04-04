@@ -21,30 +21,27 @@ class TTSSMarkerEnd(TTSSMarkerGeneric):
 
 class RTPOutputWorker(threading.Thread):
     debug = True
-    pre_frames = 2
-    _frame_size = 256
     debug = False
     dl_ofname: str = None
     data_log = None
-    num_mel_bins = None
     pkg_send_f = None
     state_lock: threading.Lock = None
     frames_rcvd = 0
     frames_prcsd = 0
     has_ended = False
     codec: G711Codec
+    samplerate_in: int
+    samplerate_out: int = G711Codec.default_sr
 
-    def __init__(self, num_mel_bins, device, vocoder=None):
+    def __init__(self, device, samplerate_in=G711Codec.default_sr):
         self.itime = monotonic()
-        self.vocoder = vocoder
-        self.num_mel_bins = num_mel_bins
         self.device = device
         #if os.path.exists(self.ofname):
         #    self.data, _ = sf.read(self.ofname)
         self.data_queue = queue.Queue()
-        self.samplerate = 16000
-        self.codec = G711Codec(self.samplerate).to(device)
+        self.codec = G711Codec(samplerate_in).to(device)
         self.state_lock = threading.Lock()
+        self.samplerate_in = samplerate_in
         super().__init__(target=self.consume_audio)
         self.daemon = True
 
@@ -93,22 +90,15 @@ class RTPOutputWorker(threading.Thread):
     def consume_audio(self):
         itime = self.itime
         stime = ctime = None
-        in_sr = 8000
-        out_sr = 8000
         out_ft = 30
         out_pt = 0 # G.711u
-        out_fsize = int(out_sr * out_ft / 1000)
+        out_fsize = int(self.samplerate_out * out_ft / 1000)
         ptime = 0.0
-        if self.vocoder:
-            pfs = torch.zeros(self.pre_frames,
-                              self.num_mel_bins,
-                              device=self.vocoder.device)
-            pf_trim = self.pre_frames * self._frame_size
         nchunk = 0
         btime = None
         chunk = torch.empty(0).to(self.device)
         chunk_o = torch.empty(0).to(self.device)
-        rsynth = RtpSynth(out_sr, out_ft)
+        rsynth = RtpSynth(self.samplerate_out, out_ft)
         while not self.ended():
             try:
                 chunk_n = self.data_queue.get(timeout=0.03)
@@ -146,9 +136,7 @@ class RTPOutputWorker(threading.Thread):
                 if btime == None:
                     min_btime = 1.0
                     btime = min(ctime - itime, min_btime)
-                    btime = self.samplerate * btime / 2
-                    if self.vocoder:
-                        btime /= self._frame_size
+                    btime = self.samplerate_in * btime / 2
                     btime = int(btime)
                     if self.debug:
                         print('btime', btime)
@@ -157,24 +145,16 @@ class RTPOutputWorker(threading.Thread):
                         print(f'{chunk.size(0)} < {btime}')
                     continue
 
-            if self.vocoder:
-                chunk_o_n = torch.cat((pfs, chunk), dim=0)
-                outputs = self.vocoder(chunk_o_n).squeeze(0)[pf_trim:]
-                #print(chunk.shape, outputs.shape)
-                pfs = chunk_o_n[-self.pre_frames:, :]
-                #print(pfs.size())
-                chunk_o_n = outputs
-            else:
-                chunk_o_n = chunk
+            chunk_o_n = chunk
             #chunk = chunk.cpu().numpy()
 
             if stime is None:
                 stime = ctime
 
-            if in_sr != out_sr:
+            if self.samplerate_in != self.samplerate_out:
                 sz = chunk_o_n.size(0)
                 chunk_o_n = self.codec.resampler[0](chunk_o_n)
-                assert chunk_o_n.size(0) == sz // (in_sr // out_sr)
+                assert chunk_o_n.size(0) == sz // (self.samplerate_in // self.samplerate_out)
             chunk_o = torch.cat((chunk_o, chunk_o_n), dim=0)
 
             etime = ctime - stime
@@ -188,7 +168,7 @@ class RTPOutputWorker(threading.Thread):
                 packet = chunk_o[:out_fsize]
                 chunk_o = chunk_o[out_fsize:]
 
-                ptime += len(packet) / out_sr
+                ptime += len(packet) / self.samplerate_out
                 etime = ctime - stime
 
                 #print(packet.size())
@@ -223,4 +203,4 @@ class RTPOutputWorker(threading.Thread):
         amplification_dB = 20.0
         data = self.data_log #* (10 ** (amplification_dB / 20))
         sf.write(self.dl_ofname, data.detach().cpu().numpy(),
-                 samplerate=self.samplerate)
+                 samplerate=self.samplerate_in)

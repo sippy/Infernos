@@ -32,7 +32,7 @@ class InfernRTPEPoint():
         self.rtp_target_lock = Lock()
         for dev in self.devs:
             try:
-                self.writer = RTPOutputWorker(0, dev)
+                self.writer = RTPOutputWorker(dev)
                 self.rsess = RTPInStream(ring, vad_chunk_in, dev)
             except RuntimeError:
                 if dev == self.devs[-1]: raise
