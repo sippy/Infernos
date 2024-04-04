@@ -1,5 +1,6 @@
-from typing import Optional, Tuple, Union
+from typing import Optional, Union
 from queue import Queue
+from functools import partial
 
 from rtpsynth.RtpJBuf import RtpJBuf, RTPFrameType, RTPParseError
 
@@ -42,8 +43,10 @@ class RTPInStream():
         self.ring.pkt_queue.put(WIStreamUpdate(self))
 
     def _proc_in_tread(self, wi:Union[WIPkt,WIStreamUpdate]):
+        def dprint(msg:str): return self.ring.dprint(f'InfernRTPIngest.run: {msg}') if self.ring.debug else None
+
         if isinstance(wi, WIStreamUpdate):
-            print("InfernRTPIngest.run: stream update")
+            dprint("stream update")
             self.jbuf = RtpJBuf(self.jb_size)
             self.last_output_lseq = None
             return
@@ -51,27 +54,27 @@ class RTPInStream():
         try:
             res = self.jbuf.udp_in(data)
         except RTPParseError as e:
-            self.ring.dprint(f"InfernRTPIngest.run: RTPParseError: {e}")
+            dprint(f"RTPParseError: {e}")
             return
         self.npkts += 1
         if self.npkts == 1:
-            self.ring.dprint(f"InfernRTPIngest.run: address={address}, rtime={rtime}, len(data) = {len(data)} data={data[:40]}")
+            dprint(f"address={address}, rtime={rtime}, len(data) = {len(data)} data={data[:40]}")
         for pkt in res:
-            if pkt.content.type == RTPFrameType.ERS: print(f"InfernRTPIngest.run: ERS packet received {pkt.content.lseq_start=}, {pkt.content.lseq_end=}")
+            if pkt.content.type == RTPFrameType.ERS: dprint(f"ERS packet received {pkt.content.lseq_start=}, {pkt.content.lseq_end=}")
             assert pkt.content.type != RTPFrameType.ERS
             if self.npkts < 10:
-                self.ring.dprint(f"InfernRTPIngest.run: {pkt.content.frame.rtp.lseq=}")
+                dprint(f"{pkt.content.frame.rtp.lseq=}")
             assert self.last_output_lseq is None or pkt.content.frame.rtp.lseq == self.last_output_lseq + 1
             self.last_output_lseq = pkt.content.frame.rtp.lseq
             if self.npkts < 10:
-                self.ring.dprint(f"InfernRTPIngest.run: {len(pkt.rtp_data)=}, {type(pkt.rtp_data)=}")
+                dprint(f"{len(pkt.rtp_data)=}, {type(pkt.rtp_data)=}")
             out = self.vad.ingest(pkt.rtp_data)
             if out is None: continue
             chunk = self.codec.decode(out.chunk, resample=True)
-            self.ring.dprint(f"InfernRTPIngest.run: active chunk: {len(chunk)=}")
+            dprint(f"active chunk: {len(chunk)=}")
             self.chunk_in(chunk.numpy())
         if self.npkts < 10 and len(res) > 0:
-            self.ring.dprint(f"InfernRTPIngest.run: res = {res}")
+            dprint(f"{res=}")
 
 class InfernRTPIngest(InfernWrkThread):
     debug = True
