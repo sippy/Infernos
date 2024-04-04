@@ -42,6 +42,7 @@ class InfernTTSWorker(InfernBatchedWorker):
     max_batch_size: int = 8
     debug = False
     tts_engine: HelloSippyRTPipe
+    output_sr: int
 
     def __init__(self, lang, output_sr):
         super().__init__()
@@ -51,6 +52,7 @@ class InfernTTSWorker(InfernBatchedWorker):
             self.vocoder = ipex.optimize(tts_engine.vocoder)
             self.chunker = ipex.optimize(tts_engine.chunker)
         self.tts_engine = tts_engine
+        self.output_sr = output_sr
 
     def process_batch(self, wis:List[HelloSippyPlayRequest]):
         new_states = [HelloSippyPipeState(self.tts_engine, r) for r in wis]
