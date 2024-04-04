@@ -34,6 +34,7 @@ from Cluster.RemoteRTPGen import RemoteRTPGen, RTPGenError
 from Cluster.RemoteTTSSession import RemoteTTSSession
 from Cluster.STTSession import STTRequest
 from SIP.InfernUA import InfernUA, model_body, InfernUASFailure
+from RTP.RTPOutputWorker import AudioChunk
 from Core.T2T.Translator import Translator
 
 class CCEventSentDone: pass
@@ -88,10 +89,10 @@ class InfernTTSUAS(InfernUA):
             self.stt_do = partial(uas.stt_actr.stt_session_soundin.remote, sess_id=uas.stt_sess_id)
             self.lang, self.stt_done = uas.stt_lang, stt_done
 
-        def __call__(self, chunk):
+        def __call__(self, chunk:AudioChunk):
             if self.debug:
-                print(f'STTProxy.chunk_in {len(chunk)=}')
-            sreq = STTRequest(chunk, self.stt_done, self.lang)
+                print(f'STTProxy.chunk_in {len(chunk.audio)=}')
+            sreq = STTRequest(chunk.audio.numpy(), self.stt_done, self.lang)
             self.stt_do(req=sreq)
 
     def outEvent(self, event, ua):

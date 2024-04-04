@@ -1,11 +1,11 @@
-from typing import Tuple
+from typing import Tuple, Union
 from uuid import uuid4, UUID
 from threading import Lock
 
 from sippy.Udp_server import Udp_server, Udp_server_opts
 from sippy.misc import local4remote
 
-from RTP.RTPOutputWorker import RTPOutputWorker,  TTSSMarkerGeneric, TTSSMarkerNewSent
+from RTP.RTPOutputWorker import RTPOutputWorker,  TTSSMarkerGeneric, TTSSMarkerNewSent, AudioChunk
 from SIP.InfernRTPIngest import RTPInStream
 
 class InfernRTPEPoint():
@@ -67,7 +67,7 @@ class InfernRTPEPoint():
         if self.debug:
             print('InfernRTPEPoint.__del__')
 
-    def soundout(self, chunk, stdtss):
+    def soundout(self, chunk:Union[AudioChunk, TTSSMarkerGeneric], stdtss):
         ismark = isinstance(chunk, TTSSMarkerGeneric)
         if self.firstframe or ismark:
             print(f'{stdtss()}: rtp_session_soundout: {"mark" if ismark else "data"}')

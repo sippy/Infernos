@@ -1,17 +1,17 @@
-import torch
-import soundfile as sf
-
-from typing import Optional
+from typing import Optional, Dict, Union
 import queue
 import threading
 from time import monotonic, sleep
 
+import ray
 from rtpsynth.RtpSynth import RtpSynth
+import torch
+import soundfile as sf
 
 from Core.Codecs.G711 import G711Codec
 
 class TTSSMarkerGeneric():
-    pass
+    track_id: int = 0
 
 class TTSSMarkerNewSent(TTSSMarkerGeneric):
     # This runs in the context of the RTPOutputWorker thread
@@ -20,10 +20,23 @@ class TTSSMarkerNewSent(TTSSMarkerGeneric):
 class TTSSMarkerEnd(TTSSMarkerGeneric):
     pass
 
+class TTSSMarkerSentDoneCB(TTSSMarkerNewSent):
+    def __init__(self, done_cb:callable, sync:bool=False):
+        super().__init__()
+        self.done_cb = done_cb
+        self.sync = sync
+
+    def on_proc(self, tro_self):
+        print(f'{monotonic():4.3f}: TTSSMarkerSentDoneCB.on_proc')
+        x = self.done_cb()
+        if self.sync: ray.get(x)
+
 class AudioChunk():
     samplerate: int
-    audio: torch.Tensor
-    def __init__(self, audio, samplerate):
+    audio:torch.Tensor
+    track_id: int = 0
+    def __init__(self, audio:torch.Tensor, samplerate:int):
+        assert isinstance(audio, torch.Tensor)
         self.audio = audio
         self.samplerate = samplerate
 
@@ -34,15 +47,22 @@ class RTPOutputStream():
     stime: Optional[float] = None
     itime: float
     ctime: Optional[float] = None
+    tracks_in: Dict[str, torch.Tensor]
     def __init__(self, itime:float, device):
         self.itime = itime
-        self.chunk = torch.empty(0).to(device)
+        self.tracks_in = {}
         self.chunk_o = torch.empty(0).to(device)
+
+    def new_track(self, track_id:int):
+        self.tracks_in[track_id] = torch.empty(0)
 
     def chunk_in(self, chunk:AudioChunk, wrkr:'RTPOutputWorker'):
         self.nchunk += 1
-        #print(chunk_n.size(), self.chunk.size())
-        self.chunk = torch.cat((self.chunk, chunk.audio), dim=0)
+        if chunk.track_id not in self.tracks_in: self.new_track(chunk.track_id)
+        previous = self.tracks_in[chunk.track_id]
+        merged = torch.cat((previous, chunk.audio), dim=0)
+        if wrkr.debug: print(f'chunk_in[{chunk.track_id}]: {chunk.audio.size()=}, {merged.size()=}')
+        self.tracks_in[chunk.track_id] = merged
         if self.ptime == 0.0:
             if self.btime == None:
                 min_btime = 1.0
@@ -51,21 +71,41 @@ class RTPOutputStream():
                 self.btime = int(self.btime)
                 if wrkr.debug:
                     print('self.btime', self.btime)
-            if self.chunk.size(0) < self.btime:
-                return None, f'{self.chunk.size(0)} < {self.btime}'
+            if merged.size(0) < self.btime:
+                return None, f'{previous.size(0)=}, {merged.size(0)=} < {self.btime=}'
         if self.stime is None:
             self.stime = self.ctime
-        return self.chunk, None
+        if len(self.tracks_in) > 1:
+            self.tracks_in[chunk.track_id] = merged
+            rdylen = min(t.size(0) for t in self.tracks_in.values())
+            if rdylen == 0: return None, 'some channels are not ready to proceed yet'
+            mixin = []
+            for tid, rdy, nrdy in [(tid, t[:rdylen], t[rdylen:]) for tid, t in self.tracks_in.items()]:
+                self.tracks_in[tid] = nrdy
+                mixin.append(rdy)
+            merged = torch.sum(torch.stack(mixin), dim=0)
+            max_val = torch.max(torch.abs(merged))
+            if max_val > 1:
+                merged /= max_val
+        else:
+            self.tracks_in[chunk.track_id] = previous[:0]
+        return merged, None
 
-    def eos(self):
-        self.chunk = self.chunk[:0]
+    def eos(self, track_id:int):
+        del self.tracks_in[track_id]
+        if len(self.tracks_in) != 0:
+            return False
         self.chunk_o = self.chunk_o[:0]
         self.ptime = 0.0
         self.stime = None
         self.itime = monotonic()
+        return True
+
+    def get_buf_nframes(self):
+        return sum(c.size(0) for c in self.tracks_in.values()) + (self.chunk_o.size(0) * 2)
 
 class RTPOutputWorker(threading.Thread):
-    debug = True
+    data_queue: queue.Queue[Union[AudioChunk, TTSSMarkerGeneric]]
     debug = False
     dl_ofname: str = None
     data_log = None
@@ -120,16 +160,17 @@ class RTPOutputWorker(threading.Thread):
         self.state_lock.release()
         return res
 
-    def soundout(self, chunk):
+    def soundout(self, chunk:Union[AudioChunk, TTSSMarkerGeneric]):
         #print(f'soundout: {monotonic():4.3f}')
         #return (0, False)
         ismark = isinstance(chunk, TTSSMarkerGeneric)
         iseos = isinstance(chunk, TTSSMarkerEnd)
-        assert ismark or chunk.size(0) > 0
+        assert ismark or chunk.audio.size(0) > 0
         if self.debug and not ismark:
-            print(f'len(chunk) = {len(chunk)}')
+            print(f'len(chunk) = {len(chunk.audio)}')
         if not ismark:
-            chunk = chunk.to(self.device)
+            assert chunk.samplerate == self.samplerate_in
+            chunk.audio = chunk.audio.to(self.device)
         self.data_queue.put(chunk)
         if iseos:
             self.join()
@@ -149,26 +190,24 @@ class RTPOutputWorker(threading.Thread):
                 break
             if isinstance(chunk_n, TTSSMarkerNewSent):
                 #pos.btime = None
-                prcsd_inc=pos.chunk.size(0) + (pos.chunk_o.size(0) * 2)
-                self.update_frm_ctrs(prcsd_inc=prcsd_inc)
-                pos.eos()
-                rsynth.resync()
-                rsynth.set_mbt(1)
+                self.update_frm_ctrs(prcsd_inc=pos.get_buf_nframes())
+                if pos.eos(chunk_n.track_id):
+                    rsynth.resync()
+                    rsynth.set_mbt(1)
                 chunk_n.on_proc(self)
                 continue
-            self.update_frm_ctrs(rcvd_inc=chunk_n.size(0))
+            self.update_frm_ctrs(rcvd_inc=chunk_n.audio.size(0))
             pos.ctime = monotonic()
 
             if self.dl_ofname is not None:
+                a = chunk_n.audio
                 if self.data_log is None:
-                    self.data_log = chunk_n
+                    self.data_log = a
                 else:
-                    self.data_log = torch.cat((self.data_log,
-                                           chunk_n))
-            achunk = AudioChunk(chunk_n, self.samplerate_in)
-            chunk_o_n, explain = pos.chunk_in(achunk, self)
+                    self.data_log = torch.cat((self.data_log, a))
+            chunk_o_n, explain = pos.chunk_in(chunk_n, self)
             if chunk_o_n is None:
-                if self.debug: print(f'consume_audio({len(pos.chunk)}), {explain}')
+                if self.debug: print(f'consume_audio({explain}')
                 continue
 
             if self.samplerate_in != self.samplerate_out:
@@ -178,10 +217,8 @@ class RTPOutputWorker(threading.Thread):
             pos.chunk_o = torch.cat((pos.chunk_o, chunk_o_n), dim=0)
 
             etime = pos.ctime - pos.stime
-            if self.debug:
-                print(f'consume_audio({len(pos.chunk)}), etime = {etime}, pos.ptime = {pos.ptime}')
-
-            pos.chunk = pos.chunk[:0]
+            #if self.debug:
+            #    print(f'consume_audio({len(pos.chunk)}), etime = {etime}, pos.ptime = {pos.ptime}')
 
             while pos.chunk_o.size(0) >= out_fsize:
                 self.update_frm_ctrs(prcsd_inc=out_fsize*2)

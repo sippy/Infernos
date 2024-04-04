@@ -23,26 +23,16 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 # SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-from typing import Optional, Union, List
+from typing import Optional
 from time import monotonic
 from uuid import uuid4, UUID
 from queue import Queue
 
 import ray
 
-from RTP.RTPOutputWorker import TTSSMarkerEnd, TTSSMarkerNewSent, TTSSMarkerGeneric
+from RTP.RTPOutputWorker import TTSSMarkerEnd, TTSSMarkerNewSent, TTSSMarkerGeneric, \
+    TTSSMarkerSentDoneCB
 from Core.InfernWrkThread import InfernWrkThread, RTPWrkTStop, RTPWrkTInit
-
-class TTSSMarkerSentDoneCB(TTSSMarkerNewSent):
-    def __init__(self, done_cb:callable, sync:bool=False):
-        super().__init__()
-        self.done_cb = done_cb
-        self.sync = sync
-
-    def on_proc(self, tro_self):
-        print(f'{monotonic():4.3f}: TTSSMarkerSentDoneCB.on_proc')
-        x = self.done_cb()
-        if self.sync: ray.get(x)
 
 class TTSRequest():
     text: str
@@ -113,14 +103,16 @@ class TTSSession(InfernWrkThread):
 
 from functools import partial
 from HelloSippyTTSRT.HelloSippyRTPipe import HelloSippyPlayRequest
+from RTP.RTPOutputWorker import AudioChunk
+from Cluster.InfernTTSWorker import InfernTTSWorker
 
 class TTSSession2():
     debug = True
     id: UUID
-    tts = None
+    tts: InfernTTSWorker
     soundout: callable
 
-    def __init__(self, tts):
+    def __init__(self, tts:InfernTTSWorker):
         super().__init__()
         self.id = uuid4()
         self.tts = tts
@@ -137,6 +129,7 @@ class TTSSession2():
             chunk = TTSSMarkerNewSent() if done_cb is None else TTSSMarkerSentDoneCB(done_cb, sync=True)
         elif not isinstance(chunk, TTSSMarkerGeneric):
             assert chunk.size(0) > 0
+            chunk=AudioChunk(chunk, self.tts.output_sr)
         self.soundout(chunk=chunk)
 
     def say(self, text, speaker_id, done_cb:Optional[callable]):

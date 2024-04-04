@@ -1,7 +1,7 @@
 try: import intel_extension_for_pytorch as ipex
 except ModuleNotFoundError: ipex = None
 
-from typing import Dict
+from typing import Dict, Union
 from uuid import UUID
 from time import monotonic
 from _thread import get_ident
@@ -10,6 +10,7 @@ from ray import ray
 
 from SIP.InfernRTPIngest import InfernRTPIngest
 from RTP.InfernRTPEPoint import InfernRTPEPoint
+from RTP.RTPOutputWorker import AudioChunk, TTSSMarkerGeneric
 
 @ray.remote(resources={"rtp": 1})
 class InfernRTPActor():
@@ -33,7 +34,7 @@ class InfernRTPActor():
         rep = self.sessions[rtp_id]
         rep.writer.end()
 
-    def rtp_session_soundout(self, rtp_id, chunk):
+    def rtp_session_soundout(self, rtp_id, chunk:Union[AudioChunk, TTSSMarkerGeneric]):
         rep = self.sessions[rtp_id]
         return rep.soundout(chunk, self.stdtss)
 
