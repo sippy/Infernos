@@ -12,7 +12,9 @@ from Core.Codecs.G711 import G711Codec
 from Core.AudioChunk import AudioChunk
 
 class TTSSMarkerGeneric():
-    track_id: int = 0
+    track_id: int
+    def __init__(self, track_id:int=0):
+        self.track_id = track_id
 
 class TTSSMarkerNewSent(TTSSMarkerGeneric):
     # This runs in the context of the RTPOutputWorker thread
@@ -22,8 +24,8 @@ class TTSSMarkerEnd(TTSSMarkerGeneric):
     pass
 
 class TTSSMarkerSentDoneCB(TTSSMarkerNewSent):
-    def __init__(self, done_cb:callable, sync:bool=False):
-        super().__init__()
+    def __init__(self, done_cb:callable, sync:bool=False, **kwargs):
+        super().__init__(**kwargs)
         self.done_cb = done_cb
         self.sync = sync
 

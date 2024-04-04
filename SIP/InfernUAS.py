@@ -34,11 +34,13 @@ from Cluster.RemoteRTPGen import RemoteRTPGen, RTPGenError
 from Cluster.RemoteTTSSession import RemoteTTSSession
 from Cluster.STTSession import STTRequest
 from SIP.InfernUA import InfernUA, model_body, InfernUASFailure
-from RTP.RTPOutputWorker import AudioChunk
+from RTP.RTPOutputWorker import TTSSMarkerNewSent
+from Core.AudioChunk import AudioChunk
 from Core.T2T.Translator import Translator
 
 class CCEventSentDone: pass
 class CCEventSTTTextIn: pass
+class CCEventVADIn: pass
 
 import pickle
 import gzip
@@ -85,15 +87,18 @@ class InfernTTSUAS(InfernUA):
         debug = True
         stt_do: callable
         stt_done: callable
-        def __init__(self, uas, stt_done):
+        vad_mirror: callable
+        def __init__(self, uas, stt_done, vad_mirror):
             self.stt_do = partial(uas.stt_actr.stt_session_soundin.remote, sess_id=uas.stt_sess_id)
             self.lang, self.stt_done = uas.stt_lang, stt_done
+            self.vad_mirror = vad_mirror
 
         def __call__(self, chunk:AudioChunk):
             if self.debug:
                 print(f'STTProxy.chunk_in {len(chunk.audio)=}')
             sreq = STTRequest(chunk.audio.numpy(), self.stt_done, self.lang)
             self.stt_do(req=sreq)
+            self.vad_mirror(chunk=chunk)
 
     def outEvent(self, event, ua):
         if not isinstance(event, CCEventTry):
@@ -104,10 +109,12 @@ class InfernTTSUAS(InfernUA):
         if rtp_target is None: return
         self.stt_sess_id = ray.get(self.stt_sess_id)
         text_cb = partial(self.sip_actr.sess_event.remote, sip_sess_id=self.id, event=CCEventSTTTextIn())
-        vad_handler = self.STTProxy(self, text_cb)
+        vad_cb = partial(self.sip_actr.sess_event.remote, sip_sess_id=self.id, event=CCEventVADIn())
+        vad_handler = self.STTProxy(self, text_cb, vad_cb)
         try:
             self.rsess = RemoteRTPGen(self.rtp_actr, vad_handler, rtp_target)
-            self._tsess.start(self.rsess.get_soundout())
+            rtp_soundout = self.rsess.get_soundout()
+            self._tsess.start(rtp_soundout)
         except RTPGenError as e:
             event = InfernUASFailure(code=500, reason=str(e))
             self.recvEvent(event)
@@ -143,6 +150,14 @@ class InfernTTSUAS(InfernUA):
                 return
             next_sentence_cb = partial(self.sip_actr.sess_event.remote, sip_sess_id=self.id, event=event)
             self._tsess.say(self.prompts.pop(0), next_sentence_cb)
+            return
+        if isinstance(event, CCEventVADIn):
+            chunk = event.kwargs['chunk']
+            assert isinstance(chunk, AudioChunk)
+            chunk.track_id += 1
+            print(f'VAD: {chunk.track_id=}')
+            self.rsess.soundout(chunk=chunk)
+            self.rsess.soundout(TTSSMarkerNewSent(track_id=chunk.track_id))
             return
         super().recvEvent(event)
 

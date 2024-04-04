@@ -8,9 +8,10 @@ from _thread import get_ident
 
 from ray import ray
 
+from Core.AudioChunk import AudioChunk
 from SIP.InfernRTPIngest import InfernRTPIngest
 from RTP.InfernRTPEPoint import InfernRTPEPoint
-from RTP.RTPOutputWorker import AudioChunk, TTSSMarkerGeneric
+from RTP.RTPOutputWorker import TTSSMarkerGeneric
 
 @ray.remote(resources={"rtp": 1})
 class InfernRTPActor():
