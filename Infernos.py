@@ -8,7 +8,7 @@ from sippy.SipLogger import SipLogger
 
 sys.path.append('.')
 
-from SIP.InfernUAS import InfernUASConf
+from SIP.InfernUA import InfernUAConf
 from Cluster.InfernSIPActor import InfernSIPActor
 
 def patch_signals():
@@ -41,27 +41,27 @@ if __name__ == '__main__':
     authpass = None
     logfile = '/var/log/Infernos.log'
     pidfile = None
-    iuac = InfernUASConf()
+    iua_c = InfernUAConf()
     foreground = False
     for o, a in opts:
         if o == '-f':
             foreground = True
         elif o == '-l':
-            iuac.laddr = a
+            iua_c.laddr = a
         elif o == '-p':
-            iuac.lport = int(a)
+            iua_c.lport = int(a)
         elif o == '-L':
             logfile = a
         elif o == '-n':
             if a.startswith('['):
                 parts = a.split(']', 1)
-                iuac.nh_addr = [parts[0] + ']', 5060]
+                iua_c.nh_addr = [parts[0] + ']', 5060]
                 parts = parts[1].split(':', 1)
             else:
                 parts = a.split(':', 1)
-                iuac.nh_addr = [parts[0], 5060]
+                iua_c.nh_addr = [parts[0], 5060]
             if len(parts) == 2:
-                iuac.nh_addr[1] = int(parts[1])
+                iua_c.nh_addr[1] = int(parts[1])
         elif o == '-s':
             sdev = a
         elif o == '-u':
@@ -91,12 +91,12 @@ if __name__ == '__main__':
     if pidfile != None:
         open(pidfile, 'w').write('%d' % os.getpid())
 
-    iuac.logger = SipLogger('Infernos',  logfile = os.path.expanduser('~/.Infernos.log'))
+    iua_c.logger = SipLogger('Infernos',  logfile = os.path.expanduser('~/.Infernos.log'))
 
-    iuac.authname = authname
-    iuac.authpass = authpass
-    iuac.cli = iuac.cld = authname
-    iua = InfernSIPActor.options(max_concurrency=2).remote(iuac)
+    iua_c.authname = authname
+    iua_c.authpass = authpass
+    iua_c.cli = iua_c.cld = authname
+    iua = InfernSIPActor.options(max_concurrency=2).remote(iua_c)
     try:
         exit(ray.get(iua.loop.remote()))
     except KeyboardInterrupt:

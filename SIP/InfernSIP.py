@@ -95,7 +95,7 @@ class InfernSIP(object):
             #    return (req.genResponse(486, 'Busy Here'), None, None)
             # New dialog
             isess = InfernTTSUAS(self.sippy_c, self.sip_actr, self.tts_actr, self.stt_actr,
-                                 self.rtp_actr, req, sip_t, self.getPrompts())
+                                 self.rtp_actr, self.getPrompts(), req, sip_t)
             self.sessions[isess.id] = isess
             return
         return (req.genResponse(501, 'Not Implemented'), None, None)

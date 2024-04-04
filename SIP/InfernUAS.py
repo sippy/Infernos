@@ -23,132 +23,60 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 # SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-from uuid import uuid4, UUID
 from functools import partial
 
 import ray
 
-from sippy.UA import UA
-from sippy.CCEvents import CCEventTry, CCEventConnect, CCEventFail, CCEventUpdate
-from sippy.MsgBody import MsgBody
-from sippy.SdpOrigin import SdpOrigin
-from sippy.SipConf import SipConf
-from sippy.SdpMedia import MTAudio
-from sippy.SipReason import SipReason
+from sippy.CCEvents import CCEventTry
 
 from Cluster.RemoteRTPGen import RemoteRTPGen, RTPGenError
-from Cluster.RemoteTTSSession import RemoteTTSSession, TTSSessionError
+from Cluster.RemoteTTSSession import RemoteTTSSession
 from Cluster.STTSession import STTRequest
-
-ULAW_PT = 0
-ULAW_RM = 'PCMU/8000'
-body_txt = 'v=0\r\n' + \
-  'o=- 380960 380960 IN IP4 192.168.22.95\r\n' + \
-  's=-\r\n' + \
-  'c=IN IP4 192.168.22.95\r\n' + \
-  't=0 0\r\n' + \
- f'm=audio 16474 RTP/AVP {ULAW_PT}\r\n' + \
- f'a=rtpmap:0 {ULAW_RM}\r\n' + \
-  'a=ptime:30\r\n' + \
-  'a=sendrecv\r\n' + \
-  '\r\n'
-model_body = MsgBody(body_txt)
-model_body.parse()
-
-class InfernUASConf(object):
-    cli = 'infernos_uas'
-    cld = 'infernos_uac'
-    authname = None
-    authpass = None
-    nh_addr = ('192.168.0.102', 5060)
-    laddr = None
-    lport = None
-    logger = None
-
-    def __init__(self):
-        self.laddr = SipConf.my_address
-        self.lport = SipConf.my_port
-
-class InfernUASFailure(CCEventFail):
-    default_code = 488
-    _code_msg = {default_code : 'Not Acceptable Here',
-                 500          : 'Server Internal Error'}
-    def __init__(self, reason=None, code=default_code):
-        self.code, self.msg = code, self._code_msg[code]
-        super().__init__((self.code, self.msg))
-        self.reason = SipReason(protocol='SIP', cause=self.code,
-                                reason=reason)
+from SIP.InfernUA import InfernUA, model_body, InfernUASFailure
 
 class CCEventSentDone: pass
 class CCEventSTTTextIn: pass
 
-class InfernTTSUAS(UA):
-    debug = True
-    id: UUID
-    rsess: RemoteRTPGen
-    our_sdp_body: MsgBody
-    _tsess: RemoteTTSSession = None
+class InfernTTSUAS(InfernUA):
+    lang: str
     prompts = None
     autoplay = True
-
-    def __init__(self, sippy_c, sip_actr, tts_actr, stt_actr, rtp_actr, req, sip_t, prompts):
-        self.id = uuid4()
-        self.sip_actr, self.rtp_actr, self.stt_actr = sip_actr, rtp_actr, stt_actr
+    _tsess: RemoteTTSSession = None
+    def __init__(self, sippy_c, sip_actr, tts_actr, stt_actr, rtp_actr, lang,
+                 prompts, req, sip_t):
+        super().__init__(sippy_c, sip_actr, rtp_actr)
         self._tsess = RemoteTTSSession(tts_actr)
-        self.stt_sess_id = stt_actr.new_stt_session.remote()
-        super().__init__(sippy_c, self.outEvent)
+        self.stt_actr, self.stt_sess_id = stt_actr, stt_actr.new_stt_session.remote()
+        self.lang = lang
         assert sip_t.noack_cb is None
         sip_t.noack_cb = self.sess_term
         self.prompts = prompts
         self.recvRequest(req, sip_t)
 
-    def extract_rtp_target(self, sdp_body):
-        if sdp_body == None:
-            event = InfernUASFailure("late offer/answer is not supported at this time, sorry")
-            self.recvEvent(event)
-            return
-        sdp_body.parse()
-        sects = [s for s in sdp_body.content.sections
-                 if s.m_header.type == MTAudio and
-                 ULAW_PT in s.m_header.formats]
-        if len(sects) == 0:
-            event = InfernUASFailure("only G.711u audio is supported at this time, sorry")
-            self.recvEvent(event)
-            return None
-        sect = sects[0]
-        return (sect.c_header.addr, sect.m_header.port)
-
     class STTProxy():
         debug = True
         stt_do: callable
         stt_done: callable
-        def __init__(self, stt_actr, stt_sess_id, stt_done):
+        def __init__(self, stt_actr, stt_sess_id, lang, stt_done):
             self.stt_do = partial(stt_actr.stt_session_soundin.remote, sess_id=stt_sess_id)
-            self.stt_done = stt_done
+            self.lang, self.stt_done = lang, stt_done
 
         def __call__(self, chunk):
             if self.debug:
                 print(f'STTProxy.chunk_in {len(chunk)=}')
-            sreq = STTRequest(chunk, self.stt_done, 'en')
+            sreq = STTRequest(chunk, self.stt_done, self.lang)
             self.stt_do(req=sreq)
 
     def outEvent(self, event, ua):
-        if isinstance(event, CCEventUpdate):
-            sdp_body = event.getData()
-            rtp_target = self.extract_rtp_target(sdp_body)
-            if rtp_target is None: return
-            self.rsess.update(rtp_target)
-            self.send_uas_resp()
-            return
         if not isinstance(event, CCEventTry):
-            #ua.disconnect()
+            super().outEvent(event, ua)
             return
         cId, cli, cld, sdp_body, auth, caller_name = event.getData()
         rtp_target = self.extract_rtp_target(sdp_body)
         if rtp_target is None: return
         self.stt_sess_id = ray.get(self.stt_sess_id)
         text_cb = partial(self.sip_actr.sess_event.remote, sip_sess_id=self.id, event=CCEventSTTTextIn())
-        vad_handler = self.STTProxy(self.stt_actr, self.stt_sess_id, text_cb)
+        vad_handler = self.STTProxy(self.stt_actr, self.stt_sess_id, self.lang, text_cb)
         try:
             self.rsess = RemoteRTPGen(self.rtp_actr, vad_handler, rtp_target)
             self._tsess.start(self.rsess.get_soundout())
@@ -169,8 +97,8 @@ class InfernTTSUAS(UA):
         if isinstance(event, CCEventSTTTextIn):
             res = event.kwargs['result']
             nsp = res.no_speech_prob
-            if nsp < 0.3: return
-            print(f'STT: -> "{res.text}"')
+            if nsp > 0.3: return
+            print(f'STT: -> "{res.text} {res.no_speech_prob}"')
             if res.text.strip() == "Let's talk.":
                 self.autoplay = False
             if self.autoplay:
@@ -188,23 +116,11 @@ class InfernTTSUAS(UA):
             return
         super().recvEvent(event)
 
-    def send_uas_resp(self):
-        self.our_sdp_body.content.o_header = SdpOrigin()
-        oevent = CCEventConnect((200, 'OK', self.our_sdp_body.getCopy()))
-        return self.recvEvent(oevent)
-
     def sess_term(self, ua=None, rtime=None, origin=None, result=0):
         print('disconnected')
         if self._tsess is None:
             return
         self._tsess.end()
         self.stt_actr.stt_session_end.remote(sess_id=self.stt_sess_id)
-        self.rsess.end()
-        self.rsess.join()
         self._tsess = None
-        if ua != self:
-            self.disconnect()
-
-    def __del__(self):
-        if self.debug:
-            print('InfernUAS.__del__')
+        super().sess_term(ua=ua, rtime=rtime, origin=origin, result=result)
