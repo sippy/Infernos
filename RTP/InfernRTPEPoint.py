@@ -17,7 +17,7 @@ class InfernRTPEPoint():
     firstframe = True
     rtp_target: Tuple[str, int]
     rtp_target_lock: Lock
-    def __init__(self, rtp_target:Tuple[str, int], vad_chunk_in:callable, ring):
+    def __init__(self, rtp_target:Tuple[str, int], ring):
         self.id = uuid4()
         assert isinstance(rtp_target, tuple) and len(rtp_target) == 2
         self.rtp_target = rtp_target
@@ -25,7 +25,7 @@ class InfernRTPEPoint():
         for dev in self.devs:
             try:
                 self.writer = RTPOutputWorker(dev)
-                self.rsess = RTPInStream(ring, vad_chunk_in, dev)
+                self.rsess = RTPInStream(ring, dev)
             except RuntimeError:
                 if dev == self.devs[-1]: raise
             else: break
@@ -48,7 +48,8 @@ class InfernRTPEPoint():
         #self.dprint(f"InfernRTPIngest.rtp_received: len(data) = {len(data)}")
         with self.rtp_target_lock:
             if address != self.rtp_target:
-                self.dprint(f"InfernRTPIngest.rtp_received: address mismatch {address=} {self.rtp_target=}")
+                if self.debug:
+                    print(f"InfernRTPIngest.rtp_received: address mismatch {address=} {self.rtp_target=}")
                 return
         self.rsess.rtp_received(data, address, rtime)
 
@@ -57,6 +58,9 @@ class InfernRTPEPoint():
         with self.rtp_target_lock:
             self.rtp_target = rtp_target
         self.rsess.stream_update()
+
+    def connect(self, vad_chunk_in:callable, audio_in:callable):
+        self.rsess.stream_connect(vad_chunk_in, audio_in)
 
     def shutdown(self):
         self.writer.join()

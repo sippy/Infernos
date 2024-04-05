@@ -1,7 +1,7 @@
 try: import intel_extension_for_pytorch as ipex
 except ModuleNotFoundError: ipex = None
 
-from typing import Dict, Union
+from typing import Dict, Union, Optional
 from uuid import UUID
 from time import monotonic
 from _thread import get_ident
@@ -24,11 +24,16 @@ class InfernRTPActor():
     def stdtss(self):
         return f'{monotonic():4.3f}'
 
-    def new_rtp_session(self, rtp_target, vad_chunk_in:callable):
+    def new_rtp_session(self, rtp_target):
         print(f'{self.stdtss()}: new_rtp_session')
-        rep = InfernRTPEPoint(rtp_target, vad_chunk_in, self.ring)
+        rep = InfernRTPEPoint(rtp_target, self.ring)
         self.sessions[rep.id] = rep
         return (rep.id, rep.rserv.uopts.laddress)
+
+    def rtp_session_connect(self, rtp_id, vad_chunk_in:callable, audio_in:Optional[callable]=None):
+        print(f'{self.stdtss()}: rtp_session_connect')
+        rep = self.sessions[rtp_id]
+        rep.connect(vad_chunk_in, audio_in)
 
     def rtp_session_end(self, rtp_id):
         print(f'{self.stdtss()}: rtp_session_end')
