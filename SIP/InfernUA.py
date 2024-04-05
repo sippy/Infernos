@@ -81,10 +81,10 @@ class InfernUA(UA):
     rsess: RemoteRTPGen
     our_sdp_body: MsgBody
 
-    def __init__(self, sippy_c, sip_actr, rtp_actr):
+    def __init__(self, isip):
         self.id = uuid4()
-        self.sip_actr, self.rtp_actr = sip_actr, rtp_actr
-        super().__init__(sippy_c, self.outEvent)
+        self.sip_actr, self.rtp_actr = isip.sip_actr, isip.rtp_actr
+        super().__init__(isip.sippy_c, self.outEvent, nh_address=isip.sippy_c['nh_addr'])
 
     def extract_rtp_target(self, sdp_body):
         if sdp_body == None:
