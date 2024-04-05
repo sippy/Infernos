@@ -23,7 +23,7 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 # SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-from typing import Optional
+from typing import Optional, List, Tuple
 from functools import partial, lru_cache
 
 import ray
@@ -34,13 +34,16 @@ from Cluster.RemoteRTPGen import RemoteRTPGen, RTPGenError
 from Cluster.RemoteTTSSession import RemoteTTSSession
 from Cluster.STTSession import STTRequest
 from SIP.InfernUA import InfernUA, model_body, InfernUASFailure
-from RTP.RTPOutputWorker import TTSSMarkerNewSent
-from Core.AudioChunk import AudioChunk
+from RTP.RTPOutputWorker import TTSSMarkerEnd
+from Core.AudioChunk import AudioChunk, AudioChunkFromURL
 from Core.T2T.Translator import Translator
 
 class CCEventSentDone: pass
-class CCEventSTTTextIn: pass
-class CCEventVADIn: pass
+class CCEventSTTTextIn:
+    def __init__(self, direction):
+        self.direction = direction
+class CCEventVADIn:
+    __init__ = CCEventSTTTextIn.__init__
 
 import pickle
 import gzip
@@ -64,41 +67,81 @@ def get_top_speakers(lang:str):
     gen = max(r.nres for r in res)
     return tuple(r.speaker_id for r in res if r.nres == gen)
 
+class STTProxy():
+    debug = True
+    stt_do: callable
+    stt_done: callable
+    vad_mirror: callable
+    def __init__(self, uas, lang, stt_done, vad_mirror):
+        self.stt_do = partial(uas.stt_actr.stt_session_soundin.remote, sess_id=uas.stt_sess_id)
+        self.lang, self.stt_done = lang, stt_done
+        self.vad_mirror = vad_mirror
+
+    def __call__(self, chunk:AudioChunk):
+        if self.debug:
+            print(f'STTProxy.chunk_in {len(chunk.audio)=}')
+        sreq = STTRequest(chunk.audio.numpy(), self.stt_done, self.lang)
+        self.stt_do(req=sreq)
+        self.vad_mirror(chunk=InfernTTSUAS.vds.eng)
+
+class SessionInfo():
+    soundout: callable
+    rsess_pause: callable
+    rsess_connect: callable
+    translator: callable
+    get_speaker: callable
+    tts_say: callable
+    def __init__(self, uas:'InfernTTSUAS', xua:InfernUA, yua:InfernUA, direction):
+        text_cb = partial(uas.sip_actr.sess_event.remote, sip_sess_id=uas.id, event=CCEventSTTTextIn(direction))
+        vad_cb = partial(uas.sip_actr.sess_event.remote, sip_sess_id=uas.id, event=CCEventVADIn(direction))
+        vad_handler = STTProxy(uas, uas.stt_lang[direction], text_cb, vad_cb)
+        self.soundout = xua.rsess.get_soundout()
+        self.rsess_pause = partial(uas.rtp_actr.rtp_session_connect.remote, xua.rsess.sess_id,
+                                   vad_handler, None)
+        ysoundout = yua.rsess.get_soundout()
+        self.rsess_connect = partial(uas.rtp_actr.rtp_session_connect.remote, xua.rsess.sess_id,
+                                     vad_handler, ysoundout)
+        self.translator = (lambda x: x) if uas.translators[direction] is None else uas.translators[direction].translate
+        self.get_speaker = (lambda: None) if uas.speakers[direction] is None else partial(choice, uas.speakers[direction])
+        self.tts_say = partial(uas._tsess[direction].say, done_cb=self.rsess_connect)
+
+class Sessions():
+    info: Tuple[SessionInfo]
+    def __init__(self, uas:'InfernTTSUAS'):
+        self.info = (
+            SessionInfo(uas, uas, uas.bob_sess[0], 0),
+            SessionInfo(uas, uas.bob_sess[0], uas, 1),
+            )
+        uas._tsess[0].start(self.info[1].soundout)
+        uas._tsess[1].start(self.info[0].soundout)
+        for i in self.info: i.rsess_connect()
+
 class InfernTTSUAS(InfernUA):
     stt_lang: str
     prompts = None
-    autoplay = True
-    _tsess: RemoteTTSSession = None
-    translator: Optional[Translator] = None
+    autoplay = False
+    _tsess: List[RemoteTTSSession]
+    translators: List[Optional[Translator]]
     def __init__(self, isip, req, sip_t):
-        super().__init__(isip.sippy_c, isip.sip_actr, isip.rtp_actr)
-        self._tsess = RemoteTTSSession(isip.tts_actr)
+        super().__init__(isip)
+        self._tsess = [RemoteTTSSession(isip.tts_actr[lang]) for lang in isip.tts_lang]
         self.stt_actr, self.stt_sess_id = isip.stt_actr, isip.stt_actr.new_stt_session.remote()
         self.stt_lang = isip.stt_lang
         assert sip_t.noack_cb is None
         sip_t.noack_cb = self.sess_term
         self.prompts = isip.getPrompts()
-        self.speakers = get_top_speakers(isip.tts_lang)
-        if isip.tts_lang != isip.stt_lang:
-            self.translator = Translator(isip.stt_lang, isip.tts_lang)
+        self.speakers = [get_top_speakers(l) for l in isip.tts_lang]
+        self.translators = [None if l1 == l2 else Translator(l1, l2) for l1, l2 in zip(isip.stt_lang, isip.tts_lang)]
+        self.bob_sess = isip.new_session('16047861714')
         self.recvRequest(req, sip_t)
 
-    class STTProxy():
-        debug = True
-        stt_do: callable
-        stt_done: callable
-        vad_mirror: callable
-        def __init__(self, uas, stt_done, vad_mirror):
-            self.stt_do = partial(uas.stt_actr.stt_session_soundin.remote, sess_id=uas.stt_sess_id)
-            self.lang, self.stt_done = uas.stt_lang, stt_done
-            self.vad_mirror = vad_mirror
+    class VADSignals():
+        def __init__(self):
+            self.eng = AudioChunkFromURL('https://github.com/commaai/openpilot/blob/master/selfdrive/assets/sounds/engage.wav?raw=true')
+            self.deng = AudioChunkFromURL('https://github.com/commaai/openpilot/blob/master/selfdrive/assets/sounds/disengage.wav?raw=true')
 
-        def __call__(self, chunk:AudioChunk):
-            if self.debug:
-                print(f'STTProxy.chunk_in {len(chunk.audio)=}')
-            sreq = STTRequest(chunk.audio.numpy(), self.stt_done, self.lang)
-            self.stt_do(req=sreq)
-            self.vad_mirror(chunk=chunk)
+    overlay_id = 42
+    vds = VADSignals()
 
     def outEvent(self, event, ua):
         if not isinstance(event, CCEventTry):
@@ -108,13 +151,10 @@ class InfernTTSUAS(InfernUA):
         rtp_target = self.extract_rtp_target(sdp_body)
         if rtp_target is None: return
         self.stt_sess_id = ray.get(self.stt_sess_id)
-        text_cb = partial(self.sip_actr.sess_event.remote, sip_sess_id=self.id, event=CCEventSTTTextIn())
-        vad_cb = partial(self.sip_actr.sess_event.remote, sip_sess_id=self.id, event=CCEventVADIn())
-        vad_handler = self.STTProxy(self, text_cb, vad_cb)
+
         try:
-            self.rsess = RemoteRTPGen(self.rtp_actr, vad_handler, rtp_target)
-            rtp_soundout = self.rsess.get_soundout()
-            self._tsess.start(rtp_soundout)
+            self.rsess = RemoteRTPGen(self.rtp_actr, rtp_target)
+            self.fabric = Sessions(self)
         except RTPGenError as e:
             event = InfernUASFailure(code=500, reason=str(e))
             self.recvEvent(event)
@@ -133,14 +173,17 @@ class InfernTTSUAS(InfernUA):
             res = event.kwargs['result']
             nsp = res.no_speech_prob
             if nsp > 0.3: return
-            print(f'STT: -> "{res.text} {res.no_speech_prob}"')
-            text = res.text if  self.translator is None else self.translator.translate(res.text)
-            if any(t.strip() == "Let's talk." for t in (res.text, text)):
+            sinfo = self.fabric.info[event.direction]
+            sdir = 'A->B' if event.direction == 0 else 'B->A'
+            print(f'STT: {sdir} "{res.text} {res.no_speech_prob}"')
+            text = sinfo.translator(res.text)
+            if event.direction == 0 and any(t.strip() == "Let's talk." for t in (res.text, text)):
                 self.autoplay = False
             if self.autoplay:
                 return
-            speaker_id=None if self.speakers is None else choice(self.speakers)
-            self._tsess.say(text, speaker_id=speaker_id)
+            speaker_id = sinfo.get_speaker()
+            sinfo.rsess_pause()
+            sinfo.tts_say(text, speaker_id=speaker_id)
             return
         if isinstance(event, CCEventSentDone):
             if not self.autoplay:
@@ -149,15 +192,18 @@ class InfernTTSUAS(InfernUA):
                 self.sess_term()
                 return
             next_sentence_cb = partial(self.sip_actr.sess_event.remote, sip_sess_id=self.id, event=event)
-            self._tsess.say(self.prompts.pop(0), next_sentence_cb)
+            self._tsess[0].say(self.prompts.pop(0), next_sentence_cb)
             return
         if isinstance(event, CCEventVADIn):
             chunk = event.kwargs['chunk']
             assert isinstance(chunk, AudioChunk)
-            chunk.track_id += 1
-            print(f'VAD: {chunk.track_id=}')
-            self.rsess.soundout(chunk=chunk)
-            self.rsess.soundout(TTSSMarkerNewSent(track_id=chunk.track_id))
+            sinfo = self.fabric.info[event.direction]
+            #chunk.track_id = self.overlay_id
+            #self.overlay_id += 1
+            dir = 'A' if event.direction == 0 else 'B'
+            print(f'VAD({dir}): {chunk.track_id=}')
+            sinfo.soundout(chunk=self.vds.eng)
+            #self.rsess.soundout(TTSSMarkerEnd(track_id=chunk.track_id))
             return
         super().recvEvent(event)
 
@@ -165,7 +211,8 @@ class InfernTTSUAS(InfernUA):
         print('disconnected')
         if self._tsess is None:
             return
-        self._tsess.end()
+        for ts in self._tsess: ts.end()
         self.stt_actr.stt_session_end.remote(sess_id=self.stt_sess_id)
         self._tsess = None
         super().sess_term(ua=ua, rtime=rtime, origin=origin, result=result)
+        self.bob_sess[0].sess_term(ua=ua, rtime=rtime, origin=origin, result=result)
