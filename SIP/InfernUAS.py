@@ -119,7 +119,7 @@ class Sessions():
 class InfernTTSUAS(InfernUA):
     stt_lang: str
     prompts = None
-    autoplay = False
+    autoplay = True
     _tsess: List[RemoteTTSSession]
     translators: List[Optional[Translator]]
     def __init__(self, isip, req, sip_t):

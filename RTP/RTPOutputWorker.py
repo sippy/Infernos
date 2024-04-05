@@ -8,6 +8,7 @@ from rtpsynth.RtpSynth import RtpSynth
 import torch
 import soundfile as sf
 
+from config.InfernGlobals import InfernGlobals as IG
 from Core.Codecs.G711 import G711Codec
 from Core.AudioChunk import AudioChunk
 
@@ -86,14 +87,18 @@ class RTPOutputStream():
         return merged, None
 
     def eos(self, track_id:int):
-        del self.tracks_in[track_id]
-        if len(self.tracks_in) != 0:
+        assert self.tracks_in[track_id].size(0) == 0
+        if not all(x.size(0) == 0 for x in self.tracks_in.values()):
             return False
         self.chunk_o = self.chunk_o[:0]
         self.ptime = 0.0
         self.stime = None
         self.itime = monotonic()
         return True
+
+    def eob(self, track_id:int):
+        del self.tracks_in[track_id]
+        return len(self.tracks_in) == 0
 
     def get_buf_nframes(self):
         return sum(c.size(0) for c in self.tracks_in.values()) + (self.chunk_o.size(0) * 2)
@@ -169,7 +174,7 @@ class RTPOutputWorker(threading.Thread):
 
     def consume_audio(self):
         out_pt = self.codec.pt
-        out_fsize = int(self.samplerate_out * self.out_ft / 1000)
+        out_fsize = self.samplerate_out * self.out_ft // 1000
         pos = RTPOutputStream(self.itime, self.device)
         rsynth = RtpSynth(self.samplerate_out, self.out_ft)
         while not self.ended():
@@ -178,7 +183,8 @@ class RTPOutputWorker(threading.Thread):
             except queue.Empty:
                 continue
             if isinstance(chunk_n, TTSSMarkerEnd):
-                break
+                if pos.eob(chunk_n.track_id): break
+                continue
             if isinstance(chunk_n, TTSSMarkerNewSent):
                 #pos.btime = None
                 self.update_frm_ctrs(prcsd_inc=pos.get_buf_nframes())
@@ -192,8 +198,8 @@ class RTPOutputWorker(threading.Thread):
 
             if chunk_n.samplerate != self.samplerate_out:
                 sz = chunk_n.audio.size(0)
-                resampler = self.codec.get_resampler(chunk_n.samplerate, self.samplerate_out)
-                chunk_n.audio = resampler(chunk_n.audio)
+                resampler = IG.get_resampler(chunk_n.samplerate, self.samplerate_out)
+                chunk_n.audio = resampler(chunk_n.audio.to(torch.float))
                 assert chunk_n.audio.size(0) == sz // (chunk_n.samplerate // self.samplerate_out)
                 chunk_n.samplerate = self.samplerate_out
 

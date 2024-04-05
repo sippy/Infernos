@@ -23,7 +23,9 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 # SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+from typing import Optional
 from weakref import WeakValueDictionary
+from queue import Queue
 
 from sippy.SipConf import SipConf
 from sippy.SipTransactionManager import SipTransactionManager
@@ -31,7 +33,9 @@ from sippy.SipURL import SipURL
 from sippy.SipRegistrationAgent import SipRegistrationAgent
 from sippy.misc import local4remote
 
+from config.InfernGlobals import InfernGlobals as IG
 from .InfernUAS import InfernTTSUAS
+from .InfernUAC import InfernUAC
 
 from Core.T2T.Translator import Translator
 
@@ -83,8 +87,8 @@ class InfernSIP(object):
         ragent.rmsg.getHFBody('to').getUrl().username = iao.cld
         prompts = ['Welcome to Infernos.'] + bender_set(2) + \
                    smith_set() + hal_set() #+ t900_set()
-        if tts_lang != 'en':
-            tr = Translator('en', tts_lang)
+        if tts_lang[0] != 'en':
+            tr = IG.get_translator('en', tts_lang[0])
             prompts = [tr.translate(p) for p in prompts]
         self.tts_lang, self.stt_lang = tts_lang, stt_lang
         self.prompts = prompts
@@ -102,6 +106,13 @@ class InfernSIP(object):
             self.sessions[isess.id] = isess
             return
         return (req.genResponse(501, 'Not Implemented'), None, None)
+
+    def new_session(self, cld:str, rval:Optional[Queue]=None):
+        uac = InfernUAC(self, cld)
+        self.sessions[uac.id] = uac
+        ret = (uac, uac.rsess.get_soundout())
+        if rval is None: return ret
+        rval.put(ret)
 
     def get_session(self, sip_sess_id):
         return self.sessions[sip_sess_id]
