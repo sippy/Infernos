@@ -4,6 +4,8 @@ from functools import lru_cache
 
 import torchaudio.transforms as T
 
+from Core.T2T.Translator import Translator
+
 class InfernGlobals():
     _lock = Lock()
     _instance = None
@@ -21,3 +23,8 @@ class InfernGlobals():
     @lru_cache(maxsize=8)
     def get_resampler(from_sr:int, to_sr:int):
         return T.Resample(orig_freq=from_sr, new_freq=to_sr)
+
+    @staticmethod
+    @lru_cache(maxsize=8)
+    def get_translator(from_lang:str, to_lang:str):
+        return Translator(from_lang, to_lang)

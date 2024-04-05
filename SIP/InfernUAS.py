@@ -30,11 +30,11 @@ import ray
 
 from sippy.CCEvents import CCEventTry
 
+from config.InfernGlobals import InfernGlobals as IG
 from Cluster.RemoteRTPGen import RemoteRTPGen, RTPGenError
 from Cluster.RemoteTTSSession import RemoteTTSSession
 from Cluster.STTSession import STTRequest
 from SIP.InfernUA import InfernUA, model_body, InfernUASFailure
-from RTP.RTPOutputWorker import TTSSMarkerEnd
 from Core.AudioChunk import AudioChunk, AudioChunkFromURL
 from Core.T2T.Translator import Translator
 
@@ -131,7 +131,7 @@ class InfernTTSUAS(InfernUA):
         sip_t.noack_cb = self.sess_term
         self.prompts = isip.getPrompts()
         self.speakers = [get_top_speakers(l) for l in isip.tts_lang]
-        self.translators = [None if l1 == l2 else Translator(l1, l2) for l1, l2 in zip(isip.stt_lang, isip.tts_lang)]
+        self.translators = [None if l1 == l2 else IG.get_translator(l1, l2) for l1, l2 in zip(isip.stt_lang, isip.tts_lang)]
         self.bob_sess = isip.new_session('16047861714')
         self.recvRequest(req, sip_t)
 
