@@ -116,7 +116,7 @@ class TestSession():
             #self.tot_error += 1.0 - similarity
             print(f"Speaker[{self.speaker_id}]: average_error={self.average_error()}")
             self.results.append(last_res)
-            #self.save()
+            self.save()
         return True if self.prompts else False
 
     def save(self):
@@ -145,7 +145,8 @@ def load_checkpoints(lang, gen=None):
         i += 1
     if gen is None:
         gen = max(r.nres for r in res)
-    return [r for r in res if r.nres >= gen], gen
+    res = [r for r in res if r.nres >= gen]
+    return res, gen
 
 import sys
 
@@ -155,6 +156,7 @@ def reeval(res, beval, gen, prompts):
         prompt, embedding = _prompt[0], _prompt[1]()
         for i, r in enumerate(res):
             lr = r.results[g]
+            if lr.text[0] == ' ': lr.text = lr.text[1:]
             similarity = beval(prompt, lr.text, embedding)
             tot_error = max((1.0 - similarity), lr.no_speech_prob)
             if r.nres == 1: assert abs(tot_error - r.tot_error) < 0.000001, f"Speaker[{r.speaker_id}]: {tot_error=} {r.tot_error=}"
@@ -165,6 +167,7 @@ def reeval(res, beval, gen, prompts):
     for r in res:
         r.nres = gen + 1
         r.results = r.results[:gen]
+        r.beval = beval
 
 def plotdensity(res, fname='density_plot'):
     import matplotlib.pyplot as plt
