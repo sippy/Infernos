@@ -1,3 +1,6 @@
+try: import intel_extension_for_pytorch as ipex
+except ModuleNotFoundError: ipex = None
+
 from typing import Dict, List, Optional, Any
 from queue import Queue
 from uuid import UUID, uuid4
@@ -21,10 +24,12 @@ from RTP.RTPOutputWorker import TTSSMarkerNewSent
 
 from utils.tts import smith_set, bender_set, hal_set
 
+
 def get_embedding(t, m, sentence):
-    inputs = t(sentence, return_tensors='pt', padding=True, truncation=True)
-    outputs = m(**inputs)
-    return outputs.last_hidden_state.mean(dim=1).squeeze().detach().numpy()  # Squeeze to remove batch dimension
+    with torch.no_grad():
+        inputs = t(sentence, return_tensors='pt', padding=True, truncation=True).to('xpu')
+        outputs = m(**inputs)
+        return outputs.last_hidden_state.mean(dim=1).squeeze().cpu().numpy()  # Squeeze to remove batch dimension
 
 class SoundPreBatcher():
     audio: Optional[torch.Tensor] = None
@@ -41,7 +46,7 @@ class SoundPreBatcher():
     def __call__(self, chunk):
         if not isinstance(chunk, TTSSMarkerNewSent):
             audio = self.audio if self.audio is not None else []
-            audio.append(chunk)
+            audio.append(chunk.audio)
             self.audio = audio
             #print(f'audio: {ts.audio.size()=}')
         else:
@@ -64,6 +69,17 @@ class TestPipe():
         self.tts_say = partial(tts_actr.tts_session_say.remote, rgen_id=self.tts_sess)
         self.lang = lang
 
+class BEval():
+    def __init__(self):
+        self.tokenizer = AutoTokenizer.from_pretrained('bert-base-uncased')
+        self.model = AutoModel.from_pretrained('bert-base-uncased').to('xpu')
+
+    def __call__(self, prompt, text, embedding1=None):
+        if embedding1 is None:
+            embedding1 = get_embedding(self.tokenizer, self.model, prompt)
+        embedding2 = get_embedding(self.tokenizer, self.model, text)
+        return 1.0 - cosine(embedding1, embedding2)
+
 class TestSession():
     id: UUID
     prompts: List[str]
@@ -74,13 +90,12 @@ class TestSession():
     tot_error: float = 0.0
     tot_duration: Fraction
     results: List[STTResult]
-    def __init__(self, prompts, speaker_id, test_pipe, tokenizer, model):
+    def __init__(self, prompts, speaker_id, test_pipe, beval):
         self.id = uuid4()
         self.prompts = list(prompts)
         self.speaker_id = speaker_id
         self.test_pipe = test_pipe
-        self.tokenizer = tokenizer
-        self.model = model
+        self.beval = beval
         self.audio = torch.zeros(0)
         self.tot_duration = Fraction(0)
         self.results = []
@@ -91,18 +106,17 @@ class TestSession():
             res = self.test_pipe.tts_say(text=self.prompts[play_id][0], speaker_id=self.speaker_id)
             ray.get(res)
         if play_id > 0:
-            embedding1 = self.prompts.pop(0)[1]
-            embedding2 = get_embedding(self.tokenizer, self.model, last_res.text)
-            similarity = 1 - cosine(embedding1, embedding2)
+            prompt = self.prompts.pop(0)
+            similarity = self.beval(prompt[0], last_res.text, prompt[1])
             self.nres += 1
             assert similarity >= 0.0 and similarity <= 1.0
             assert last_res.no_speech_prob >= 0.0 and last_res.no_speech_prob <= 1.0
-            self.tot_error += max((1.0 - similarity), last_res.no_speech_prob)
+            self.tot_error = max(self.tot_error, max((1.0 - similarity), last_res.no_speech_prob))
             self.tot_duration += last_res.duration
             #self.tot_error += 1.0 - similarity
             print(f"Speaker[{self.speaker_id}]: average_error={self.average_error()}")
             self.results.append(last_res)
-            self.save()
+            #self.save()
         return True if self.prompts else False
 
     def save(self):
@@ -117,6 +131,47 @@ class TestSession():
     def average_error(self):
         return self.tot_error / self.nres
 
+def load_checkpoints(lang, gen=None):
+    i = 0
+    res = []
+    skips = 0
+    while True:
+        try:
+            with gzip.open(f'checkpoint/{lang}/speaker.{i}.{lang}.pkl.gz', 'rb') as file:
+                res.append(pickle.load(file))
+        except FileNotFoundError:
+            skips += 1
+            if skips > 200: break
+        i += 1
+    if gen is None:
+        gen = max(r.nres for r in res)
+    return [r for r in res if r.nres >= gen], gen
+
+import sys
+
+def reeval(res, beval, gen, prompts):
+    for g in range(gen):
+        _prompt = prompts[g]
+        prompt, embedding = _prompt[0], _prompt[1]()
+        for i, r in enumerate(res):
+            lr = r.results[g]
+            similarity = beval(prompt, lr.text, embedding)
+            tot_error = max((1.0 - similarity), lr.no_speech_prob)
+            if r.nres == 1: assert abs(tot_error - r.tot_error) < 0.000001, f"Speaker[{r.speaker_id}]: {tot_error=} {r.tot_error=}"
+            r.tot_error = max(tot_error, (0 if g == 0 else r.tot_error))
+            r.tot_duration = lr.duration + (0 if g == 0 else r.tot_duration)
+            sys.stdout.write(f'Reeval: {i} of {len(res)}\r')
+        sys.stdout.write('\n')
+    for r in res:
+        r.nres = gen + 1
+        r.results = r.results[:gen]
+
+def plotdensity(res, fname='density_plot'):
+    import matplotlib.pyplot as plt
+    errors = [x.tot_error for x in res]
+    plt.hist(errors, bins=400)
+    plt.savefig(f'{fname}.png', format='png', dpi=300)
+
 @ray.remote(resources={"head": 1})
 class InfernBenchActor():
     default_resources = {'head':1, 'stt': 2, 'tts':2}
@@ -126,7 +181,7 @@ class InfernBenchActor():
 
     def loop(self):
         self.writer = SummaryWriter()
-        lang = 'en'
+        lang = 'it'
         tts_actrs = tuple(InfernTTSActor.remote() for _ in range(self.default_resources['tts']))
         stt_actrs = tuple(InfernSTTActor.remote() for _ in range(self.default_resources['stt']))
         fut = tuple(x.start.remote() for x in stt_actrs)
@@ -134,29 +189,31 @@ class InfernBenchActor():
         _prompts = [y for x in smith_set() + bender_set() + hal_set() for y in x.split('|')]
         if lang != 'en':
             tr = Translator('en', lang)
-            _prompts = [tr.translate(x) for x in _prompts]
+            _prompts = [tr.translate(p.strip()) for x in _prompts for p in x.split('|')]
         _prompts.sort(key=lambda x: len(x), reverse=True)
         _prompts.pop(0)
-        tokenizer = AutoTokenizer.from_pretrained('bert-base-uncased')
-        model = AutoModel.from_pretrained('bert-base-uncased')
+        beval = BEval()
+        prompts = [(x, partial(get_embedding, beval.tokenizer, beval.model, x)) for x in _prompts]
+        res, gen = load_checkpoints(lang, 1)
+        reeval(res, beval, 1, prompts)
+        plotdensity(res)
+        cut_trs = 0.2
+        #raise Exception(f'{len(res)=}')
         self.queue = Queue()
         self.sessions = {}
         for x in fut: ray.get(x)
         self_actor = ray.get_runtime_context().current_actor
-        prompts = [(x, partial(get_embedding, tokenizer, model, x)) for x in _prompts]
         def stt_actr(_s): return  stt_actrs[_s % len(stt_actrs)]
         def tts_actr(_s): return  tts_actrs[_s % len(tts_actrs)]
-        res = []
-        batch_size = 48 + 4
-        target_nspeakers = 30
+        #res = []
+        batch_size = 16 + 4
+        target_nspeakers = 300
         test_pipes = list(TestPipe(tts_actr(i), stt_actr(i), self_actor, lang)
                           for i in range(batch_size))
-        draining = False
-        class _next_ts():
+        class _next_ts_0():
             speaker_id = 0
-            def __init__(self, tokenizer, model):
-                self.tokenizer = tokenizer
-                self.model = model
+            def __init__(self, beval):
+                self.beval = beval
             def __call__(self, tp, prompt):
                 prompt = list(prompt)
                 try:
@@ -164,15 +221,21 @@ class InfernBenchActor():
                         ts = pickle.load(file)
                     ts.prompts = prompt
                     ts.test_pipe = tp
-                    ts.tokenizer = self.tokenizer
-                    ts.model = self.model
+                    ts.beval = self.beval
                 except FileNotFoundError:
                     ts = TestSession(prompt, self.speaker_id, tp, self.tokenizer, self.model)
                 self.speaker_id += 1
                 return ts
-        next_ts = _next_ts(tokenizer, model)
+        class _next_ts():
+            def __init__(self, res):
+                self.res = res
+            def __call__(self, tp, prompt):
+                ts = self.res.pop(0)
+                ts.prompts = list(prompt)
+                ts.test_pipe = tp
+                return ts
+        next_ts, draining = (_next_ts_0(beval), False) if gen == 0 else (_next_ts(res), True)
         prompt = None
-        gen = 0
         while True:
             if prompt is None: prompt = tuple((x, y()) for x, y in prompts[gen:gen+1])
             if len(test_pipes) > 0 and not draining:
@@ -191,8 +254,8 @@ class InfernBenchActor():
                     draining = True
                     continue
                 self.sessions[tp.id] = ts
-                if ts.speaker_id > 2000:
-                    draining = True
+                #if ts.speaker_id > 2000:
+                #    draining = True
             while len(test_pipes) == 0 or (draining and len(test_pipes) < batch_size):
                 if draining:
                     print(f'Draining: {batch_size - len(test_pipes)} left')
@@ -200,26 +263,20 @@ class InfernBenchActor():
                 res.append(ts)
                 test_pipes.append(ts.test_pipe)
             if draining:
-                for t in tts_actrs: ray.get(t.stop.remote())
-                raise Exception("BP")
-                res.sort(key=lambda x: x.average_error())
-                if (len(res) / 2) <= target_nspeakers:
-                    res = res[:target_nspeakers]
+                #for t in tts_actrs: ray.get(t.stop.remote())
+                #raise Exception("BP")
+                plotdensity(res, f'density_plot_end_{gen}')
+                ilen = len(res)
+                res = [r for r in res if r.tot_error < cut_trs]
+                print(f'Cutting from {ilen} to {len(res)}')
+                if len(res) <= target_nspeakers:
                     break
-                res = res[:int(len(res)/2)]
-                class _next_ts():
-                    def __init__(self, res):
-                        self.res = res
-                    def __call__(self, tp, prompt):
-                        ts = self.res.pop(0)
-                        ts.prompts = list(prompt)
-                        ts.test_pipe = tp
-                        return ts
                 next_ts = _next_ts(res)
                 res = []
                 prompt = None
                 draining = False
                 gen += 1
+                plotdensity(res, f'density_plot_start_{gen}')
 
         for ts in res:
             print(f"Speaker[{ts.speaker_id}]: average_error={ts.average_error()}")
