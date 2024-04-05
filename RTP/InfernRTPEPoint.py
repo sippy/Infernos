@@ -6,7 +6,7 @@ from sippy.Udp_server import Udp_server, Udp_server_opts
 from sippy.misc import local4remote
 
 from RTP.RTPOutputWorker import RTPOutputWorker,  TTSSMarkerGeneric, TTSSMarkerNewSent, AudioChunk
-from SIP.InfernRTPIngest import RTPInStream
+from RTP.InfernRTPIngest import RTPInStream
 
 class InfernRTPEPoint():
     debug = False
