@@ -3,6 +3,7 @@ import torch
 import torchaudio.transforms as T
 import audioop
 
+from config.InfernGlobals import InfernGlobals as IG
 from Core.AudioChunk import AudioChunk
 
 _pcm_to_ulaw_ct = torch.zeros(65536, dtype=torch.uint8)
@@ -22,9 +23,6 @@ for i in range(256):
 class G711Codec():
     default_sr:int = 8000
     pt:int = 0 # G.711u
-    resamplers: Dict[Tuple[int, int], T.Resample]
-    def __init__(self):
-        self.resamplers = {}
 
     def encode(self, audio_tensor:torch.Tensor):
         # Scale from [-1, 1] to [-32768, 32767]
@@ -46,16 +44,9 @@ class G711Codec():
         audio_float = audio_pcm.float() / 32767.0
 
         if resample and sample_rate != self.default_sr:
-            resampler = self.get_resampler(self.default_sr, sample_rate)
+            resampler = IG.get_resampler(self.default_sr, sample_rate)
             return AudioChunk(resampler(audio_float), sample_rate)
         return AudioChunk(audio_float, self.default_sr)
-
-    def get_resampler(self, from_sr:int, to_sr:int):
-        key = (from_sr, to_sr)
-        if (resampler:=self.resamplers.get(key, None)) is None:
-            resampler = T.Resample(orig_freq=from_sr, new_freq=to_sr)
-            self.resamplers[key] = resampler
-        return resampler
 
     def device(self):
         global _pcm_to_ulaw_ct, _ulaw_to_pcm_ct
@@ -67,5 +58,4 @@ class G711Codec():
         assert _pcm_to_ulaw_ct.device == _ulaw_to_pcm_ct.device
         _pcm_to_ulaw_ct = _pcm_to_ulaw_ct.to(device)
         _ulaw_to_pcm_ct = _ulaw_to_pcm_ct.to(device)
-        self.resamplers = dict((k, v.to(device)) for k, v in self.resamplers.items())
         return self

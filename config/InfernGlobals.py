@@ -2,6 +2,8 @@ from safetorch.InfernTorcher import InfernTorcher
 from threading import Lock
 from functools import lru_cache
 
+import torchaudio.transforms as T
+
 class InfernGlobals():
     _lock = Lock()
     _instance = None
@@ -14,3 +16,8 @@ class InfernGlobals():
                 cls._instance = super(InfernGlobals, cls).__new__(cls)
                 cls.torcher = InfernTorcher()
         return cls._instance
+
+    @staticmethod
+    @lru_cache(maxsize=8)
+    def get_resampler(from_sr:int, to_sr:int):
+        return T.Resample(orig_freq=from_sr, new_freq=to_sr)
