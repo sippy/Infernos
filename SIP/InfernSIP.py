@@ -88,8 +88,11 @@ class InfernSIP(object):
         prompts = ['Welcome to Infernos.'] + bender_set(2) + \
                    smith_set() + hal_set() #+ t900_set()
         if tts_lang[0] != 'en':
-            tr = IG.get_translator('en', tts_lang[0])
-            prompts = [tr.translate(p) for p in prompts]
+            tr = IG.get_translator('en', tts_lang[0]).translate
+        else:
+            tr = lambda x: x
+        prompts = [[tr(_p.strip()) for _p in p.split('|')] for p in prompts]
+        prompts = tuple(tuple(p) if len(p) > 1 else p[0] for p in prompts)
         self.tts_lang, self.stt_lang = tts_lang, stt_lang
         self.prompts = prompts
         ragent.doregister()
@@ -118,4 +121,4 @@ class InfernSIP(object):
         return self.sessions[sip_sess_id]
 
     def getPrompts(self):
-        return [f'{human_readable_time()}',] + self.prompts
+        return [f'{human_readable_time()}',] + list(self.prompts)
