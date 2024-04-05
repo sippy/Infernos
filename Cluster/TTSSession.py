@@ -23,7 +23,7 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 # SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-from typing import Optional
+from typing import Optional, Union, List, Tuple
 from time import monotonic
 from uuid import uuid4, UUID
 from queue import Queue
@@ -110,41 +110,38 @@ class TTSSession2():
     debug = True
     id: UUID
     tts: InfernTTSWorker
+    tts_actr: ray.remote
     soundout: callable
 
-    def __init__(self, tts:InfernTTSWorker):
+    def __init__(self, tts:InfernTTSWorker, tts_actr:ray.remote):
         super().__init__()
         self.id = uuid4()
-        self.tts = tts
+        self.tts, self.tts_actr = tts, tts_actr
 
     def start(self, soundout:callable):
         self.soundout = soundout
 
-    def sound_dispatch(self, chunk, done_cb, done_cb_local=False):
+    def sound_dispatch(self, chunk, done_cb:callable):
         if chunk is None:
-            print(f'{monotonic():4.3f}: TTSSession.sound_dispatch {done_cb_local=} {done_cb=}')
-            if done_cb_local:
-                done_cb()
-                done_cb = None
+            print(f'{monotonic():4.3f}: TTSSession.sound_dispatch {done_cb=}')
             chunk = TTSSMarkerNewSent() if done_cb is None else TTSSMarkerSentDoneCB(done_cb, sync=True)
         elif not isinstance(chunk, TTSSMarkerGeneric):
             assert chunk.size(0) > 0
             chunk=AudioChunk(chunk, self.tts.output_sr)
         self.soundout(chunk=chunk)
 
-    def say(self, text, speaker_id, done_cb:Optional[callable]):
+    def say(self, text:Union[str,List[str],Tuple[str]], speaker_id, done_cb:Optional[callable]):
         if self.debug:
             print(f'{monotonic():4.3f}: TTSSession.say: ${text=}, {speaker_id=}, {done_cb=}')
         if speaker_id is not None:
             speaker = self.tts.get_voice(speaker_id)
         else:
             speaker, speaker_id = self.tts.get_rand_voice()
-        text = text.split('|', 1)
+        if isinstance(text, str): text = (text,)
         if len(text) > 1:
-            done_cb = partial(self.say, text=text[1], speaker_id=speaker_id, done_cb=done_cb)
-            soundout = partial(self.sound_dispatch, done_cb=done_cb, done_cb_local=True)
-        else:
-            soundout = partial(self.sound_dispatch, done_cb=done_cb)
+            done_cb = partial(self.tts_actr.tts_session_say.remote, rgen_id=self.id, text=text[1:],
+                              speaker_id=speaker_id, done_cb=done_cb)
+        soundout = partial(self.sound_dispatch, done_cb=done_cb)
         req = HelloSippyPlayRequest(self.id, text[0], speaker, soundout)
         self.tts.infer(req)
 

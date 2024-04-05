@@ -26,7 +26,8 @@ class InfernTTSActor():
         self.tts.stop()
 
     def new_tts_session(self):
-        rgen = TTSSession2(self.tts)
+        tts_actr = ray.get_runtime_context().current_actor
+        rgen = TTSSession2(self.tts, tts_actr)
         self.sessions[rgen.id] = rgen
         return rgen.id
 
