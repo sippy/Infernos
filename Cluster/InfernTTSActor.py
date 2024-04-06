@@ -6,12 +6,12 @@ from uuid import UUID
 
 import ray
 
-from Cluster.TTSSession import TTSSession2
+from Cluster.TTSSession import TTSSession
 from Cluster.InfernTTSWorker import InfernTTSWorker
 
 @ray.remote(num_gpus=1, resources={"tts": 1})
 class InfernTTSActor():
-    sessions: Dict[UUID, TTSSession2]
+    sessions: Dict[UUID, TTSSession]
     tts: InfernTTSWorker
 
     def __init__(self):
@@ -27,7 +27,7 @@ class InfernTTSActor():
 
     def new_tts_session(self):
         tts_actr = ray.get_runtime_context().current_actor
-        rgen = TTSSession2(self.tts, tts_actr)
+        rgen = TTSSession(self.tts, tts_actr)
         self.sessions[rgen.id] = rgen
         return rgen.id
 
