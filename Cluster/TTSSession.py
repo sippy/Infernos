@@ -48,7 +48,7 @@ class TTSRequest():
         self.done_cb = done_cb
 
 class TTSSession():
-    debug = True
+    debug = False
     id: UUID
     tts: InfernTTSWorker
     tts_actr: ray.remote
