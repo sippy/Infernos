@@ -38,13 +38,12 @@ from SIP.InfernUA import InfernUA, model_body, InfernUASFailure
 from RTP.AudioInput import AudioInput
 from Core.AudioChunk import AudioChunk, AudioChunkFromURL
 from Core.T2T.Translator import Translator
+from RTP.RTPOutputWorker import TTSSMarkerEnd
 
 class CCEventSentDone: pass
 class CCEventSTTTextIn:
     def __init__(self, direction):
         self.direction = direction
-class CCEventVADIn:
-    __init__ = CCEventSTTTextIn.__init__
 
 import pickle
 import gzip
@@ -73,17 +72,30 @@ class STTProxy():
     stt_do: callable
     stt_done: callable
     vad_mirror: callable
-    def __init__(self, uas, lang, stt_done, vad_mirror):
-        self.stt_do = partial(uas.stt_actr.stt_session_soundin.remote, sess_id=uas.stt_sess_id)
+    def __init__(self, uas, lang, stt_done, vad_mirror, stt_sess_id, direction):
+        self.stt_do = partial(uas.stt_actr.stt_session_soundin.remote, sess_id=stt_sess_id)
         self.lang, self.stt_done = lang, stt_done
         self.vad_mirror = vad_mirror
+        self.eng = uas.vds.eng
+        self.direction = direction
 
+    # This method runs in the context of the RTP Actor
     def __call__(self, chunk:AudioChunk):
         if self.debug:
-            print(f'STTProxy.chunk_in {len(chunk.audio)=}')
+            dir = 'A' if self.direction == 0 else 'B'
+            print(f'STTProxy: VAD({dir}): {len(chunk.audio)=} {chunk.track_id=}')
+        self.vad_mirror(chunk=self.eng)
         sreq = STTRequest(chunk.audio.numpy(), self.stt_done, self.lang)
         self.stt_do(req=sreq)
-        self.vad_mirror(chunk=InfernTTSUAS.vds.eng)
+
+class TTSProxy():
+    tts_consume: callable
+    def __init__(self, tts_consume):
+        self.tts_consume = tts_consume
+
+    def __call__(self, chunk:AudioChunk):
+        chunk.track_id = 1
+        self.tts_consume(chunk=chunk)
 
 class SessionInfo():
     soundout: callable
@@ -94,9 +106,9 @@ class SessionInfo():
     tts_say: callable
     def __init__(self, uas:'InfernTTSUAS', xua:InfernUA, yua:InfernUA, direction):
         text_cb = partial(uas.sip_actr.sess_event.remote, sip_sess_id=uas.id, event=CCEventSTTTextIn(direction))
-        vad_cb = partial(uas.sip_actr.sess_event.remote, sip_sess_id=uas.id, event=CCEventVADIn(direction))
-        vad_handler = STTProxy(uas, uas.stt_lang[direction], text_cb, vad_cb)
         self.soundout = xua.rsess.get_soundout()
+        vad_cb = self.soundout
+        vad_handler = STTProxy(uas, uas.stt_lang[direction], text_cb, vad_cb, xua.stt_sess_id, direction)
         self.rsess_pause = partial(uas.rtp_actr.rtp_session_connect.remote, xua.rsess.sess_id,
                                    AudioInput(vad_chunk_in=vad_handler))
         ysoundout = yua.rsess.get_soundout()
@@ -105,6 +117,7 @@ class SessionInfo():
         self.translator = (lambda x: x) if uas.translators[direction] is None else uas.translators[direction].translate
         self.get_speaker = (lambda: None) if uas.speakers[direction] is None else partial(choice, uas.speakers[direction])
         self.tts_say = partial(uas._tsess[direction].say, done_cb=self.rsess_connect)
+        self.tts_soundout = TTSProxy(ysoundout)
 
 class Sessions():
     info: Tuple[SessionInfo]
@@ -115,7 +128,9 @@ class Sessions():
             )
         uas._tsess[0].start(self.info[1].soundout)
         uas._tsess[1].start(self.info[0].soundout)
-        for i in self.info: i.rsess_connect()
+        for i, t in zip(self.info, uas._tsess):
+            i.rsess_connect()
+            t.start(i.tts_soundout)
 
 class InfernTTSUAS(InfernUA):
     stt_lang: str
@@ -125,8 +140,9 @@ class InfernTTSUAS(InfernUA):
     translators: List[Optional[Translator]]
     def __init__(self, isip, req, sip_t):
         super().__init__(isip)
+        self.vds = self.VADSignals()
         self._tsess = [RemoteTTSSession(isip.tts_actr[lang]) for lang in isip.tts_lang]
-        self.stt_actr, self.stt_sess_id = isip.stt_actr, isip.stt_actr.new_stt_session.remote()
+        self.stt_actr, self.stt_sess_id = isip.stt_actr, isip.stt_actr.new_stt_session.remote(keep_context=True)
         self.stt_lang = isip.stt_lang
         assert sip_t.noack_cb is None
         sip_t.noack_cb = self.sess_term
@@ -138,11 +154,13 @@ class InfernTTSUAS(InfernUA):
 
     class VADSignals():
         def __init__(self):
-            self.eng = AudioChunkFromURL('https://github.com/commaai/openpilot/blob/master/selfdrive/assets/sounds/engage.wav?raw=true')
-            self.deng = AudioChunkFromURL('https://github.com/commaai/openpilot/blob/master/selfdrive/assets/sounds/disengage.wav?raw=true')
+            eng, deng= [AudioChunkFromURL(f'https://github.com/commaai/openpilot/blob/master/selfdrive/assets/sounds/{n}.wav?raw=true') for n in ('engage', 'disengage')]
+            eng.track_id = 1
+            self.eng = ray.put(eng)
+            self.deng = ray.put(deng)
 
     overlay_id = 42
-    vds = VADSignals()
+    #vds = VADSignals()
 
     def outEvent(self, event, ua):
         if not isinstance(event, CCEventTry):
@@ -176,7 +194,7 @@ class InfernTTSUAS(InfernUA):
             if nsp > 0.3: return
             sinfo = self.fabric.info[event.direction]
             sdir = 'A->B' if event.direction == 0 else 'B->A'
-            print(f'STT: {sdir} "{res.text} {res.no_speech_prob}"')
+            print(f'STT: {sdir} "{res.text=}" {res.no_speech_prob=}')
             text = sinfo.translator(res.text)
             if event.direction == 0 and any(t.strip() == "Let's talk." for t in (res.text, text)):
                 self.autoplay = False
@@ -184,6 +202,7 @@ class InfernTTSUAS(InfernUA):
                 return
             speaker_id = sinfo.get_speaker()
             sinfo.rsess_pause()
+            print(f'TTS: {sdir} "{text=}" {speaker_id=}')
             sinfo.tts_say(text, speaker_id=speaker_id)
             return
         if isinstance(event, CCEventSentDone):
@@ -195,17 +214,6 @@ class InfernTTSUAS(InfernUA):
             next_sentence_cb = partial(self.sip_actr.sess_event.remote, sip_sess_id=self.id, event=event)
             self._tsess[0].say(self.prompts.pop(0), next_sentence_cb)
             return
-        if isinstance(event, CCEventVADIn):
-            chunk = event.kwargs['chunk']
-            assert isinstance(chunk, AudioChunk)
-            sinfo = self.fabric.info[event.direction]
-            #chunk.track_id = self.overlay_id
-            #self.overlay_id += 1
-            dir = 'A' if event.direction == 0 else 'B'
-            print(f'VAD({dir}): {chunk.track_id=}')
-            sinfo.soundout(chunk=self.vds.eng)
-            #self.rsess.soundout(TTSSMarkerEnd(track_id=chunk.track_id))
-            return
         super().recvEvent(event)
 
     def sess_term(self, ua=None, rtime=None, origin=None, result=0):
@@ -214,6 +222,7 @@ class InfernTTSUAS(InfernUA):
             return
         for ts in self._tsess: ts.end()
         self.stt_actr.stt_session_end.remote(sess_id=self.stt_sess_id)
+        self.stt_actr.stt_session_end.remote(sess_id=self.bob_sess[0].stt_sess_id)
         self._tsess = None
         super().sess_term(ua=ua, rtime=rtime, origin=origin, result=result)
         self.bob_sess[0].sess_term(ua=ua, rtime=rtime, origin=origin, result=result)
