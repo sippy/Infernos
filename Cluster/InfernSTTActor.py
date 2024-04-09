@@ -23,9 +23,9 @@ class InfernSTTActor():
     def stop(self):
         self.stt.stop()
 
-    def new_stt_session(self):
+    def new_stt_session(self, keep_context:bool=False):
         if self.debug: print('InfernSTTActor.new_stt_session')
-        sess = STTSession(self.stt)
+        sess = STTSession(self.stt, keep_context)
         self.sessions[sess.id] = sess
         return sess.id
 

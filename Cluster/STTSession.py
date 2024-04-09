@@ -1,3 +1,4 @@
+from typing import List, Optional
 from uuid import uuid4, UUID
 from fractions import Fraction
 
@@ -23,11 +24,13 @@ class STTSession():
     debug = False
     id: UUID
     lang: str = 'en'
+    context: List[int]
 
-    def __init__(self, stt):
+    def __init__(self, stt, keep_context:bool):
         super().__init__()
         self.id = uuid4()
         self.stt = stt
+        self.context = [] if keep_context else None
 
     def stop(self):
         if self.debug: print('STTSession.stop')
@@ -35,4 +38,4 @@ class STTSession():
 
     def soundin(self, req:STTRequest):
         if self.debug: print(f'STTSession.soundin({len(req.audio)=})')
-        self.stt.infer(req)
+        self.stt.infer((req, self.context))

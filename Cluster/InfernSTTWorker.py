@@ -34,13 +34,15 @@ class InfernSTTWorker(InfernBatchedWorker):
         self.processor = transformers.WhisperProcessor.from_pretrained(model_name)
         self.device = device
 
-    def process_batch(self, wis:List[STTRequest]):
+    def process_batch(self, wis:List[Tuple[STTRequest, int]]):
         if self.debug:
             print(f'InfernSTTWorker.process_batch: got {len(wis)=}')
-        audios = [wi.audio for wi in wis]
+        audios = [wi[0].audio for wi in wis]
         inputs = self.processor(audios, return_tensors="np", sampling_rate=self.sample_rate)
         features = ctranslate2.StorageView.from_array(inputs.input_features)
-        prompt = self.get_prompt(tuple(wi.lang for wi in wis))
+        prompt = self.get_prompt(tuple(wi[0].lang for wi in wis))
+        ctxs = [wi[1] for wi in wis]
+        prompt = [(50361,) + tuple(c[:-224]) + (50258,) + p if c else p for c, p in zip(ctxs, prompt)]
         try:
             results = self.model.generate(features, prompt, return_no_speech_prob=True)
         except RuntimeError as e:
@@ -50,13 +52,15 @@ class InfernSTTWorker(InfernBatchedWorker):
             for i in range(len(wis)):
                 features = ctranslate2.StorageView.from_array(inputs.input_features[i:i+1])
                 results.extend(self.model.generate(features, prompt[i:i+1], return_no_speech_prob=True))
-        good_results = [(wi, self.processor.decode(r.sequences_ids[0], skip_special_tokens=True), r.no_speech_prob)
+        good_results = [(wi[0], wi[1], self.processor.decode(r.sequences_ids[0]), r.no_speech_prob, r.sequences_ids[0])
                             for wi, r in zip(wis, results)]
-        for wi, r, nsp in good_results:
+        for wi, c, r, nsp, t in good_results:
             duration = Fraction(len(wi.audio), self.sample_rate)
             # Remove leading and trailing space: "WhitespaceTokenizer adds a space at the beginning?" (copilot)
             if len(r) > 0 and r[0] == ' ': r = r[1:]
-            wi.text_cb(result = STTResult(text=r, no_speech_prob=nsp, duration=duration))
+            if c is not None: c[:] = (c + t)[:-224]
+            res = STTResult(text=r, no_speech_prob=nsp, duration=duration)
+            wi.text_cb(result = res)
 
     @lru_cache(maxsize=16)
     def get_prompt(self, langs:Tuple[str]):
