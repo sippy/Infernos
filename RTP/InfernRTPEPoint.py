@@ -5,8 +5,10 @@ from threading import Lock
 from sippy.Udp_server import Udp_server, Udp_server_opts
 from sippy.misc import local4remote
 
-from RTP.RTPOutputWorker import RTPOutputWorker,  TTSSMarkerGeneric, TTSSMarkerNewSent, AudioChunk
+from Core.AudioChunk import AudioChunk
+from RTP.RTPOutputWorker import RTPOutputWorker,  TTSSMarkerGeneric, TTSSMarkerNewSent
 from RTP.InfernRTPIngest import RTPInStream
+from RTP.AudioInput import AudioInput
 
 class InfernRTPEPoint():
     debug = False
@@ -59,8 +61,8 @@ class InfernRTPEPoint():
             self.rtp_target = rtp_target
         self.rsess.stream_update()
 
-    def connect(self, vad_chunk_in:callable, audio_in:callable):
-        self.rsess.stream_connect(vad_chunk_in, audio_in)
+    def connect(self, ain:AudioInput):
+        self.rsess.stream_connect(ain)
 
     def shutdown(self):
         self.writer.join()

@@ -7,6 +7,7 @@ from rtpsynth.RtpJBuf import RtpJBuf, RTPFrameType, RTPParseError
 from Core.InfernWrkThread import InfernWrkThread, RTPWrkTRun
 from Core.VAD.ZlibVAD import ZlibVAD
 from Core.Codecs.G711 import G711Codec
+from RTP.AudioInput import AudioInput
 
 class WIPkt():
     def __init__(self, stream: 'RTPInStream', data, address, rtime):
@@ -20,10 +21,9 @@ class WIStreamUpdate():
         self.stream = stream
 
 class WIStreamConnect():
-    def __init__(self, stream: 'RTPInStream', chunk_in:callable, audio_in:callable):
+    def __init__(self, stream: 'RTPInStream', ain:AudioInput):
         self.stream = stream
-        self.chunk_in = chunk_in
-        self.audio_in = audio_in
+        self.ain = ain
 
 class RTPInStream():
     jb_size: int = 8
@@ -33,13 +33,13 @@ class RTPInStream():
     codec: G711Codec
     output_sr: int = 16000
     npkts: int = 0
-    chunk_in: Optional[callable] = None
-    audio_in: Optional[callable] = None
+    ain: AudioInput
     def __init__(self, ring:'InfernRTPIngest', device:str):
         self.jbuf = RtpJBuf(self.jb_size)
         self.vad = ZlibVAD(self.input_sr)
         self.codec = G711Codec().to(device)
         self.ring = ring
+        self.ain = AudioInput()
 
     def rtp_received(self, data, address, rtime):
         #self.dprint(f"InfernRTPIngest.rtp_received: len(data) = {len(data)}")
@@ -48,8 +48,8 @@ class RTPInStream():
     def stream_update(self):
         self.ring.pkt_queue.put(WIStreamUpdate(self))
 
-    def stream_connect(self, chunk_in:callable, audio_in:callable):
-        self.ring.pkt_queue.put(WIStreamConnect(self, chunk_in, audio_in))
+    def stream_connect(self, ain:AudioInput):
+        self.ring.pkt_queue.put(WIStreamConnect(self, ain))
 
     def _proc_in_tread(self, wi:Union[WIPkt,WIStreamUpdate]):
         def dprint(msg:str): return self.ring.dprint(f'InfernRTPIngest.run: {msg}') if self.ring.debug else None
@@ -61,7 +61,7 @@ class RTPInStream():
             return
         if isinstance(wi, WIStreamConnect):
             dprint("stream connect")
-            self.audio_in, self.chunk_in = wi.audio_in, wi.chunk_in
+            self.ain = wi.ain
             return
         data, address, rtime = wi.data, wi.address, wi.rtime
         try:
@@ -72,9 +72,8 @@ class RTPInStream():
         self.npkts += 1
         if self.npkts == 1:
             dprint(f"address={address}, rtime={rtime}, len(data) = {len(data)} data={data[:40]}")
-        out_data = b''
         for pkt in res:
-            if pkt.content.type == RTPFrameType.ERS: dprint(f"ERS packet received {pkt.content.lseq_start=}, {pkt.content.lseq_end=}")
+            if pkt.content.type == RTPFrameType.ERS: print(f"ERS packet received {pkt.content.lseq_start=}, {pkt.content.lseq_end=}")
             assert pkt.content.type != RTPFrameType.ERS
             if self.npkts < 10:
                 dprint(f"{pkt.content.frame.rtp.lseq=}")
@@ -82,20 +81,19 @@ class RTPInStream():
             self.last_output_lseq = pkt.content.frame.rtp.lseq
             if self.npkts < 10:
                 dprint(f"{len(pkt.rtp_data)=}, {type(pkt.rtp_data)=}")
-            out = self.vad.ingest(pkt.rtp_data)
-            if self.audio_in is not None:
-                out_data += pkt.rtp_data
+            out = self.vad.ingest(pkt.rtp_data, self.audio_vad_chunk_in)
             if out is None: continue
             chunk = self.codec.decode(out.chunk, resample=True, sample_rate=self.output_sr)
             dprint(f"active chunk: {len(chunk.audio)=}")
-            if self.chunk_in is not None:
-                self.chunk_in(chunk=chunk)
-        if self.audio_in is not None and len(out_data) > 0:
-            chunk = self.codec.decode(out_data, resample=True, sample_rate=self.output_sr)
-            dprint(f"audio chunk: {len(chunk.audio)=}")
-            self.audio_in(chunk=chunk)
+            if self.ain.vad_chunk_in is not None:
+                self.ain.vad_chunk_in(chunk=chunk)
         if self.npkts < 10 and len(res) > 0:
             dprint(f"{res=}")
+
+    def audio_vad_chunk_in(self, chunk_data:bytes, active:bool):
+        if self.ain.audio_in is None: return
+        chunk = self.codec.decode(chunk_data, resample=True, sample_rate=self.output_sr)
+        self.ain.audio_in(chunk=chunk)
 
 class InfernRTPIngest(InfernWrkThread):
     debug = False

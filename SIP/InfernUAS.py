@@ -35,6 +35,7 @@ from Cluster.RemoteRTPGen import RemoteRTPGen, RTPGenError
 from Cluster.RemoteTTSSession import RemoteTTSSession
 from Cluster.STTSession import STTRequest
 from SIP.InfernUA import InfernUA, model_body, InfernUASFailure
+from RTP.AudioInput import AudioInput
 from Core.AudioChunk import AudioChunk, AudioChunkFromURL
 from Core.T2T.Translator import Translator
 
@@ -97,10 +98,10 @@ class SessionInfo():
         vad_handler = STTProxy(uas, uas.stt_lang[direction], text_cb, vad_cb)
         self.soundout = xua.rsess.get_soundout()
         self.rsess_pause = partial(uas.rtp_actr.rtp_session_connect.remote, xua.rsess.sess_id,
-                                   vad_handler, None)
+                                   AudioInput(vad_chunk_in=vad_handler))
         ysoundout = yua.rsess.get_soundout()
         self.rsess_connect = partial(uas.rtp_actr.rtp_session_connect.remote, xua.rsess.sess_id,
-                                     vad_handler, ysoundout)
+                                     AudioInput(ysoundout, vad_handler))
         self.translator = (lambda x: x) if uas.translators[direction] is None else uas.translators[direction].translate
         self.get_speaker = (lambda: None) if uas.speakers[direction] is None else partial(choice, uas.speakers[direction])
         self.tts_say = partial(uas._tsess[direction].say, done_cb=self.rsess_connect)
@@ -119,7 +120,7 @@ class Sessions():
 class InfernTTSUAS(InfernUA):
     stt_lang: str
     prompts = None
-    autoplay = True
+    autoplay = False
     _tsess: List[RemoteTTSSession]
     translators: List[Optional[Translator]]
     def __init__(self, isip, req, sip_t):

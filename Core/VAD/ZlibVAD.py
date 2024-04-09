@@ -15,7 +15,7 @@ class ZlibVAD():
     def __init__(self, input_sr: int = 8000):
         self.vad_frames = int(input_sr * self.vad_duration)
 
-    def ingest(self, data: bytes):
+    def ingest(self, data: bytes, vad_chunk_in: callable):
         self.vad_buffer += data
         if len(self.vad_buffer) < self.vad_frames:
             return None
@@ -24,6 +24,7 @@ class ZlibVAD():
         r = len(compress(chunk))/len(chunk)
         v = VADResult()
         active = False if r < self.vad_threshold else True
+        vad_chunk_in(chunk, active)
         if active:
             self.ninactive = 0
             self.chunk_buffer += chunk

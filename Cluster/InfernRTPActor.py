@@ -12,6 +12,7 @@ from Core.AudioChunk import AudioChunk
 from RTP.InfernRTPIngest import InfernRTPIngest
 from RTP.InfernRTPEPoint import InfernRTPEPoint
 from RTP.RTPOutputWorker import TTSSMarkerGeneric
+from RTP.AudioInput import AudioInput
 
 @ray.remote(resources={"rtp": 1})
 class InfernRTPActor():
@@ -30,10 +31,10 @@ class InfernRTPActor():
         self.sessions[rep.id] = rep
         return (rep.id, rep.rserv.uopts.laddress)
 
-    def rtp_session_connect(self, rtp_id, vad_chunk_in:callable, audio_in:Optional[callable]=None):
+    def rtp_session_connect(self, rtp_id, ain:AudioInput):
         print(f'{self.stdtss()}: rtp_session_connect')
         rep = self.sessions[rtp_id]
-        rep.connect(vad_chunk_in, audio_in)
+        rep.connect(ain)
 
     def rtp_session_end(self, rtp_id):
         print(f'{self.stdtss()}: rtp_session_end')
