@@ -5,22 +5,23 @@ import ray
 from ray.exceptions import RayTaskError
 
 from RTP.AudioInput import AudioInput
+from RTP.RTPParams import RTPParams
 
 class RTPGenError(Exception):
     pass
 
 class RemoteRTPGen():
-    def __init__(self, rtp_actr, target):
+    def __init__(self, rtp_actr, params:RTPParams):
         self.rtp_actr = rtp_actr
-        fut = rtp_actr.new_rtp_session.remote(target)
+        fut = rtp_actr.new_rtp_session.remote(params)
         try: self.sess_id, self.rtp_address = ray.get(fut)
         except RayTaskError as e: raise RTPGenError("new_rtp_session() failed") from e
 
     def connect(self, ain:AudioInput):
         return self.rtp_actr.rtp_session_connect.remote(self.sess_id, ain)
 
-    def update(self, target):
-        return ray.get(self.rtp_actr.rtp_session_update.remote(self.sess_id, target))
+    def update(self, params:RTPParams):
+        return ray.get(self.rtp_actr.rtp_session_update.remote(self.sess_id, params))
 
     def get_soundout(self) -> callable:
         return partial(self.rtp_actr.rtp_session_soundout.remote, rtp_id=self.sess_id)

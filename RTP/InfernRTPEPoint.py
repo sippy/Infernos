@@ -9,6 +9,7 @@ from Core.AudioChunk import AudioChunk
 from RTP.RTPOutputWorker import RTPOutputWorker
 from RTP.InfernRTPIngest import RTPInStream
 from RTP.AudioInput import AudioInput
+from RTP.RTPParams import RTPParams
 from Core.AStreamMarkers import ASMarkerGeneric, ASMarkerNewSent
 
 class InfernRTPEPoint():
@@ -18,48 +19,55 @@ class InfernRTPEPoint():
     id: UUID
     dl_file = None
     firstframe = True
-    rtp_target: Tuple[str, int]
-    rtp_target_lock: Lock
-    def __init__(self, rtp_target:Tuple[str, int], ring):
+    rtp_params:RTPParams
+    rtp_params_lock: Lock
+    def __init__(self, rtp_params:RTPParams, ring):
         self.id = uuid4()
-        assert isinstance(rtp_target, tuple) and len(rtp_target) == 2
-        self.rtp_target = rtp_target
-        self.rtp_target_lock = Lock()
+        self.rtp_params = rtp_params
+        self.rtp_params_lock = Lock()
         for dev in self.devs:
             try:
-                self.writer = RTPOutputWorker(dev)
+                self.writer = RTPOutputWorker(dev, rtp_params.out_ptime)
                 self.rsess = RTPInStream(ring, dev)
             except RuntimeError:
                 if dev == self.devs[-1]: raise
             else: break
-        rtp_laddr = local4remote(rtp_target[0])
+        self.device = dev
+        rtp_laddr = local4remote(rtp_params.rtp_target[0])
         rserv_opts = Udp_server_opts((rtp_laddr, 0), self.rtp_received)
         rserv_opts.nworkers = 1
         rserv_opts.direct_dispatch = True
         self.rserv = Udp_server({}, rserv_opts)
+        self.writer_setup()
+
+    def writer_setup(self):
         self.writer.set_pkt_send_f(self.send_pkt)
         if self.dl_file is not None:
             self.writer.enable_datalog(self.dl_file)
         self.writer.start()
 
     def send_pkt(self, pkt):
-        with self.rtp_target_lock:
-            rtp_target = self.rtp_target
+        with self.rtp_params_lock:
+            rtp_target = self.rtp_params.rtp_target
         self.rserv.send_to(pkt, rtp_target)
 
     def rtp_received(self, data, address, udp_server, rtime):
         #self.dprint(f"InfernRTPIngest.rtp_received: len(data) = {len(data)}")
-        with self.rtp_target_lock:
-            if address != self.rtp_target:
+        with self.rtp_params_lock:
+            if address != self.rtp_params.rtp_target:
                 if self.debug:
-                    print(f"InfernRTPIngest.rtp_received: address mismatch {address=} {self.rtp_target=}")
+                    print(f"InfernRTPIngest.rtp_received: address mismatch {address=} {self.rtp_params.rtp_target=}")
                 return
         self.rsess.rtp_received(data, address, rtime)
 
-    def update(self, rtp_target:Tuple[str, int]):
-        assert isinstance(rtp_target, tuple) and len(rtp_target) == 2
-        with self.rtp_target_lock:
-            self.rtp_target = rtp_target
+    def update(self, rtp_params:RTPParams):
+        with self.rtp_params_lock:
+            self.rtp_params.rtp_target = rtp_params.rtp_target
+            if self.rtp_params.out_ptime != rtp_params.out_ptime:
+                self.writer.end()
+                self.writer.join()
+                self.writer = RTPOutputWorker(self.device, rtp_params.out_ptime)
+                self.writer_setup()
         self.rsess.stream_update()
 
     def connect(self, ain:AudioInput):

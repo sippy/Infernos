@@ -35,6 +35,7 @@ from sippy.SdpMedia import MTAudio
 from sippy.SipReason import SipReason
 
 from Cluster.RemoteRTPGen import RemoteRTPGen
+from RTP.RTPParams import RTPParams
 
 ULAW_PT = 0
 ULAW_RM = 'PCMU/8000'
@@ -87,6 +88,11 @@ class InfernUA(UA):
         super().__init__(isip.sippy_c, self.outEvent, nh_address=isip.sippy_c['nh_addr'])
 
     def extract_rtp_target(self, sdp_body):
+        p = self.extract_rtp_params(sdp_body)
+        if p is None: return None
+        return p.rtp_target
+
+    def extract_rtp_params(self, sdp_body):
         if sdp_body == None:
             event = InfernUASFailure("late offer/answer is not supported at this time, sorry")
             self.recvEvent(event)
@@ -100,14 +106,18 @@ class InfernUA(UA):
             self.recvEvent(event)
             return None
         sect = sects[0]
-        return (sect.c_header.addr, sect.m_header.port)
+        try:
+            ptime = int(next(x for x in sect.a_headers if x.name == 'ptime').value)
+        except StopIteration:
+            ptime = None
+        return RTPParams((sect.c_header.addr, sect.m_header.port), ptime)
 
     def outEvent(self, event, ua):
         if isinstance(event, CCEventUpdate):
             sdp_body = event.getData()
-            rtp_target = self.extract_rtp_target(sdp_body)
-            if rtp_target is None: return
-            self.rsess.update(rtp_target)
+            rtp_params = self.extract_rtp_params(sdp_body)
+            if rtp_params is None: return
+            self.rsess.update(rtp_params)
             self.send_uas_resp()
             return
 

@@ -13,6 +13,7 @@ from RTP.InfernRTPIngest import InfernRTPIngest
 from RTP.InfernRTPEPoint import InfernRTPEPoint
 from Core.AStreamMarkers import ASMarkerGeneric
 from RTP.AudioInput import AudioInput
+from RTP.RTPParams import RTPParams
 
 @ray.remote(resources={"rtp": 1})
 class InfernRTPActor():
@@ -25,9 +26,9 @@ class InfernRTPActor():
     def stdtss(self):
         return f'{monotonic():4.3f}'
 
-    def new_rtp_session(self, rtp_target):
+    def new_rtp_session(self, rtp_params:RTPParams):
         print(f'{self.stdtss()}: new_rtp_session')
-        rep = InfernRTPEPoint(rtp_target, self.ring)
+        rep = InfernRTPEPoint(rtp_params, self.ring)
         self.sessions[rep.id] = rep
         return (rep.id, rep.rserv.uopts.laddress)
 
@@ -51,10 +52,10 @@ class InfernRTPActor():
         rep.shutdown()
         del self.sessions[rtp_id]
 
-    def rtp_session_update(self, rtp_id, rtp_target):
+    def rtp_session_update(self, rtp_id, rtp_params:RTPParams):
         print(f'{self.stdtss()}: rtp_session_update')
         rep = self.sessions[rtp_id]
-        rep.update(rtp_target)
+        rep.update(rtp_params)
 
     def start(self):
         self.ring = InfernRTPIngest()
