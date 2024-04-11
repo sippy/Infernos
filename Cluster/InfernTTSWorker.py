@@ -58,8 +58,16 @@ class InfernTTSWorker(InfernBatchedWorker):
         new_states = [HelloSippyPipeState(self.tts_engine, r) for r in wis]
         state = HelloSippyPipeStateBatched(new_states, self.tts_engine)
         while True:
-            self.tts_engine.infer(state)
+            try:
+                self.tts_engine.infer(state)
+            except RuntimeError as e:
+                self.handle_runtime_error(e, wis, state)
+                raise
             if not self.tts_engine.unbatch_and_dispatch(state): break
+
+    def handle_runtime_error(self, e, state, wis:List[HelloSippyPlayRequest]):
+        print(f'InfernTTSWorker.handle_runtime_error: {e}')
+        affected = [(d, w) for d, w in zip(state.dispatch, wis) if d is not None]
 
     def get_voice(self, *args):
         return self.tts_engine.get_voice(*args)
