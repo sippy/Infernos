@@ -36,9 +36,10 @@ from Cluster.RemoteTTSSession import RemoteTTSSession
 from Cluster.STTSession import STTRequest
 from SIP.InfernUA import InfernUA, model_body, InfernUASFailure
 from RTP.AudioInput import AudioInput
+from RTP.RTPParams import RTPParams
 from Core.AudioChunk import AudioChunk, AudioChunkFromURL
 from Core.T2T.Translator import Translator
-from RTP.RTPOutputWorker import TTSSMarkerEnd
+from Core.T2T.NumbersToWords import NumbersToWords
 
 class CCEventSentDone: pass
 class CCEventSTTTextIn:
@@ -79,12 +80,12 @@ class STTProxy():
         self.eng = uas.vds.eng
         self.direction = direction
 
-    # This method runs in the context of the RTP Actor
+    # This method runs in the context of the inbound RTP Actor
     def __call__(self, chunk:AudioChunk):
         if self.debug:
             dir = 'A' if self.direction == 0 else 'B'
             print(f'STTProxy: VAD({dir}): {len(chunk.audio)=} {chunk.track_id=}')
-        self.vad_mirror(chunk=self.eng)
+        #self.vad_mirror(chunk=self.eng)
         sreq = STTRequest(chunk.audio.numpy(), self.stt_done, self.lang)
         self.stt_do(req=sreq)
 
@@ -95,7 +96,17 @@ class TTSProxy():
 
     def __call__(self, chunk:AudioChunk):
         chunk.track_id = 1
+        chunk.debug = True
         self.tts_consume(chunk=chunk)
+
+class SoundOutProxy():
+    soundout: callable
+    def __init__(self, soundout):
+        self.soundout = soundout
+
+    # This method runs in the context of the outbound RTP Actor
+    def __call__(self, chunk:AudioChunk):
+        self.soundout(chunk=chunk)
 
 class SessionInfo():
     soundout: callable
@@ -116,7 +127,8 @@ class SessionInfo():
                                      AudioInput(ysoundout, vad_handler))
         self.translator = (lambda x: x) if uas.translators[direction] is None else uas.translators[direction].translate
         self.get_speaker = (lambda: None) if uas.speakers[direction] is None else partial(choice, uas.speakers[direction])
-        self.tts_say = partial(uas._tsess[direction].say, done_cb=self.rsess_connect)
+        #self.tts_say = partial(uas._tsess[direction].say, done_cb=self.rsess_connect)
+        self.tts_say = uas._tsess[direction].say
         self.tts_soundout = TTSProxy(ysoundout)
 
 class Sessions():
@@ -148,14 +160,21 @@ class InfernTTSUAS(InfernUA):
         sip_t.noack_cb = self.sess_term
         self.prompts = isip.getPrompts()
         self.speakers = [get_top_speakers(l) for l in isip.tts_lang]
-        self.translators = [None if l1 == l2 else IG.get_translator(l1, l2) for l1, l2 in zip(isip.stt_lang, isip.tts_lang)]
+        def ntw_filter(from_code, to_code, tr, text, obj):
+            print(f'ntw_filter({from_code=}, {to_code=}, {text=})')
+            return obj(tr(text))
+        self.translators = [partial(ntw_filter, obj=NumbersToWords()) if l1 == l2 else IG.get_translator(l1, l2, filter=partial(ntw_filter, obj=NumbersToWords(l2)))
+                            for l1, l2 in zip(isip.stt_lang, isip.tts_lang)]
+        #self.bob_sess = isip.new_session('205')
+        #self.bob_sess = isip.new_session('601')
         self.bob_sess = isip.new_session('16047861714')
         self.recvRequest(req, sip_t)
 
     class VADSignals():
         def __init__(self):
             eng, deng= [AudioChunkFromURL(f'https://github.com/commaai/openpilot/blob/master/selfdrive/assets/sounds/{n}.wav?raw=true') for n in ('engage', 'disengage')]
-            eng.track_id = 1
+            eng.track_id = 2
+            eng.debug = True
             self.eng = ray.put(eng)
             self.deng = ray.put(deng)
 
@@ -167,12 +186,15 @@ class InfernTTSUAS(InfernUA):
             super().outEvent(event, ua)
             return
         cId, cli, cld, sdp_body, auth, caller_name = event.getData()
-        rtp_target = self.extract_rtp_target(sdp_body)
-        if rtp_target is None: return
+        rtp_params = self.extract_rtp_params(sdp_body)
+        if rtp_params is None:
+            event = InfernUASFailure(code=500)
+            self.recvEvent(event)
+            return
         self.stt_sess_id = ray.get(self.stt_sess_id)
 
         try:
-            self.rsess = RemoteRTPGen(self.rtp_actr, rtp_target)
+            self.rsess = RemoteRTPGen(self.rtp_actr, rtp_params)
             self.fabric = Sessions(self)
         except RTPGenError as e:
             event = InfernUASFailure(code=500, reason=str(e))
@@ -201,7 +223,7 @@ class InfernTTSUAS(InfernUA):
             if self.autoplay:
                 return
             speaker_id = sinfo.get_speaker()
-            sinfo.rsess_pause()
+            #sinfo.rsess_pause()
             print(f'TTS: {sdir} "{text=}" {speaker_id=}')
             sinfo.tts_say(text, speaker_id=speaker_id)
             return
