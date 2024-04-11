@@ -30,8 +30,8 @@ from queue import Queue
 
 import ray
 
-from RTP.RTPOutputWorker import TTSSMarkerNewSent, TTSSMarkerGeneric, \
-    TTSSMarkerSentDoneCB
+from Core.AStreamMarkers import ASMarkerNewSent, ASMarkerGeneric, \
+    ASMarkerSentDoneCB
 
 from functools import partial
 from HelloSippyTTSRT.HelloSippyRTPipe import HelloSippyPlayRequest
@@ -66,8 +66,8 @@ class TTSSession():
         if chunk is None:
             if self.debug:
                 print(f'{monotonic():4.3f}: TTSSession.sound_dispatch {done_cb=}')
-            chunk = TTSSMarkerNewSent() if done_cb is None else TTSSMarkerSentDoneCB(done_cb, sync=True)
-        elif not isinstance(chunk, TTSSMarkerGeneric):
+            chunk = ASMarkerNewSent() if done_cb is None else ASMarkerSentDoneCB(done_cb, sync=True)
+        elif not isinstance(chunk, ASMarkerGeneric):
             assert chunk.size(0) > 0
             chunk=AudioChunk(chunk, self.tts.output_sr)
         self.soundout(chunk=chunk)

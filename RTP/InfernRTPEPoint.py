@@ -6,9 +6,10 @@ from sippy.Udp_server import Udp_server, Udp_server_opts
 from sippy.misc import local4remote
 
 from Core.AudioChunk import AudioChunk
-from RTP.RTPOutputWorker import RTPOutputWorker,  TTSSMarkerGeneric, TTSSMarkerNewSent
+from RTP.RTPOutputWorker import RTPOutputWorker
 from RTP.InfernRTPIngest import RTPInStream
 from RTP.AudioInput import AudioInput
+from Core.AStreamMarkers import ASMarkerGeneric, ASMarkerNewSent
 
 class InfernRTPEPoint():
     debug = False
@@ -73,11 +74,11 @@ class InfernRTPEPoint():
         if self.debug:
             print('InfernRTPEPoint.__del__')
 
-    def soundout(self, chunk:Union[AudioChunk, TTSSMarkerGeneric], stdtss):
-        ismark = isinstance(chunk, TTSSMarkerGeneric)
+    def soundout(self, chunk:Union[AudioChunk, ASMarkerGeneric], stdtss):
+        ismark = isinstance(chunk, ASMarkerGeneric)
         if self.firstframe or ismark:
-            print(f'{stdtss()}: rtp_session_soundout: {"mark" if ismark else "data"}')
+            print(f'{stdtss()}: rtp_session_soundout[{str(self.id)[:6]}]: {"mark" if ismark else chunk.audio.size(0)}')
             self.firstframe = False
-        if ismark and isinstance(chunk, TTSSMarkerNewSent):
+        if ismark and isinstance(chunk, ASMarkerNewSent):
             self.firstframe = True
         return self.writer.soundout(chunk)
