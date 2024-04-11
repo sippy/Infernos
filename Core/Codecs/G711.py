@@ -43,10 +43,10 @@ class G711Codec():
         # Scale from [-32768, 32767] to [-1, 1]
         audio_float = audio_pcm.float() / 32767.0
 
+        chunk = AudioChunk(audio_float, self.default_sr)
         if resample and sample_rate != self.default_sr:
-            resampler = IG.get_resampler(self.default_sr, sample_rate)
-            return AudioChunk(resampler(audio_float), sample_rate)
-        return AudioChunk(audio_float, self.default_sr)
+            chunk.resample(sample_rate)
+        return chunk
 
     def device(self):
         global _pcm_to_ulaw_ct, _ulaw_to_pcm_ct
