@@ -1,4 +1,5 @@
-from typing import Tuple
+from typing import Tuple, Optional
+from functools import partial
 
 import argostranslate.package
 from argostranslate.translate import get_installed_languages
@@ -18,7 +19,7 @@ def load_pair(from_code, to_code):
 class Translator():
     supported_langs = ["en", "it", "de", "ru", "ja"]
     translators: Tuple[callable]
-    def __init__(self, from_code: str, to_code: str):
+    def __init__(self, from_code: str, to_code: str, filter:Optional[callable]=None):
         to_code_p = [to_code,]
         inter_codes = [x for x in self.supported_langs if x not in (from_code, to_code)]
         success = False
@@ -44,8 +45,10 @@ class Translator():
         translators = []
         for tc in to_code_p:
             to_lang = ilangs[tc]
-            translators.append(from_lang.get_translation(to_lang).translate)
-            from_lang = to_lang
+            tr = from_lang.get_translation(to_lang).translate
+            if filter is not None: tr = partial(filter, from_code=from_code, to_code=tc, tr=tr)
+            translators.append(tr)
+            from_lang, from_code = to_lang, tc
         self.translators = tuple(translators)
 
     def translate(self, sourceText):

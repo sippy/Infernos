@@ -26,5 +26,5 @@ class InfernGlobals():
 
     @staticmethod
     @lru_cache(maxsize=8)
-    def get_translator(from_lang:str, to_lang:str):
-        return Translator(from_lang, to_lang)
+    def get_translator(from_lang:str, to_lang:str, **kwa):
+        return Translator(from_lang, to_lang, **kwa)
