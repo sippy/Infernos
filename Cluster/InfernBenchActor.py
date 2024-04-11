@@ -20,10 +20,9 @@ from Cluster.InfernTTSActor import InfernTTSActor
 from Cluster.InfernSTTActor import InfernSTTActor
 from Cluster.STTSession import STTRequest, STTResult
 from Core.T2T.Translator import Translator
-from RTP.RTPOutputWorker import TTSSMarkerNewSent
+from Core.AStreamMarkers import ASMarkerNewSent
 
 from utils.tts import smith_set, bender_set, hal_set
-
 
 def get_embedding(t, m, sentence):
     with torch.no_grad():
@@ -44,7 +43,7 @@ class SoundPreBatcher():
         self.lang = lang
 
     def __call__(self, chunk):
-        if not isinstance(chunk, TTSSMarkerNewSent):
+        if not isinstance(chunk, ASMarkerNewSent):
             audio = self.audio if self.audio is not None else []
             audio.append(chunk.audio)
             self.audio = audio
@@ -71,9 +70,10 @@ class TestPipe():
         self.lang = lang
 
 class BEval():
-    def __init__(self):
-        self.tokenizer = AutoTokenizer.from_pretrained('bert-base-uncased')
-        self.model = AutoModel.from_pretrained('bert-base-uncased').to('xpu')
+    def __init__(self, lang):
+        model_name = 'bert-base-uncased' if lang == 'en' else 'bert-base-multilingual-uncased'
+        self.tokenizer = AutoTokenizer.from_pretrained(model_name)
+        self.model = AutoModel.from_pretrained(model_name).to('xpu')
 
     def __call__(self, prompt, text, embedding1=None):
         if embedding1 is None:
@@ -83,7 +83,7 @@ class BEval():
 
 class TestSession():
     id: UUID
-    ver: int = 0
+    ver: int = 1
     prompts: List[str]
     tts_sess_id: UUID
     stt_sess_id: UUID
@@ -155,11 +155,12 @@ def load_checkpoints(lang, gen=None):
 
 import sys
 
-def reeval(res, beval, gen, prompts):
+def reeval(res:List[TestSession], beval, gen, prompts):
     for g in range(gen):
         _prompt = prompts[g]
         prompt, embedding = _prompt[0], _prompt[1]()
         for i, r in enumerate(res):
+            sys.stdout.write(f'Reeval@{g}: {i} of {len(res)}\r')
             lr = r.results[g]
             if not isinstance(lr, STTResult):
                 prompt_orig, lr = r.results[g]
@@ -167,15 +168,23 @@ def reeval(res, beval, gen, prompts):
                     prompt_orig = prompt_orig[0]
                     r.results[g] = (prompt_orig, lr)
                 assert prompt_orig == prompt, f'{prompt_orig=} != {prompt=}'
+                if False:
+                    continue
             else:
                 r.results[g] = (prompt, lr)
             if lr.text[0] == ' ': lr.text = lr.text[1:]
             similarity = beval(prompt, lr.text, embedding)
             tot_error = max((1.0 - similarity), lr.no_speech_prob)
-            if r.nres == g: assert abs(tot_error - r.tot_error) < 0.000001, f"Speaker[{r.speaker_id}]: {tot_error=} {r.tot_error=}"
+            #if (r.nres - 1) == g: assert abs(tot_error - r.tot_error) < 0.000001, f"Speaker[{r.speaker_id}]: {tot_error=} {r.tot_error=}"
+            if g == 0:
+                r.tot_error_orig = r.tot_error
+                r.tot_duration_orig = r.tot_duration
             r.tot_error = max(tot_error, (0 if g == 0 else r.tot_error))
             r.tot_duration = lr.duration + (0 if g == 0 else r.tot_duration)
-            sys.stdout.write(f'Reeval@{g}: {i} of {len(res)}\r')
+            if (r.nres - 1) == g:
+                assert r.tot_error >= r.tot_error_orig or r.tot_error > 0.1, f"Speaker[{r.speaker_id}]: {r.tot_error=} {r.tot_error_orig=}"
+                assert r.tot_duration == r.tot_duration_orig, f"Speaker[{r.speaker_id}]: {r.tot_duration=} {r.tot_duration_orig=}"
+                del r.tot_error_orig, r.tot_duration_orig
         sys.stdout.write('\n')
     for r in res:
         r.nres = gen
@@ -186,7 +195,7 @@ def plotdensity(res, fname='density_plot'):
     import matplotlib.pyplot as plt
     plt.figure()
     errors = [x.tot_error for x in res]
-    plt.hist(errors, bins=400)
+    plt.hist(errors, bins=len(res)//10)
     plt.savefig(f'{fname}.png', format='png', dpi=300)
 
 class TestPipes():
@@ -227,7 +236,7 @@ class InfernBenchActor():
 
     def loop(self):
         self.writer = SummaryWriter()
-        lang = 'it'
+        lang = 'de'
         self_actor = ray.get_runtime_context().current_actor
         batch_size = (self.default_resources['stt'] + self.default_resources['tts']) * 8
         self.TPS = TPS = TestPipes(self.default_resources['tts'], self.default_resources['stt'], batch_size, lang, self_actor)
@@ -237,9 +246,9 @@ class InfernBenchActor():
             _prompts = [tr.translate(p.strip()) for x in _prompts for p in x.split('|')]
         _prompts.sort(key=lambda x: len(x), reverse=True)
         _prompts.pop(0)
-        beval = BEval()
+        beval = BEval(lang)
         prompts = [(x, partial(get_embedding, beval.tokenizer, beval.model, x)) for x in _prompts]
-        gen = 7
+        gen = 4
         res, _gen = load_checkpoints(lang, gen+1)
         reeval(res, beval, gen+1, prompts)
         plotdensity(res)
