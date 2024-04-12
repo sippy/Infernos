@@ -231,11 +231,11 @@ class HelloSippyRTPipe:
     def __init__(self, device, model=default_model, get_processor:Optional[callable]=None, output_sr:int=output_sr, **kwa):
         self.cuda_lock = InfernGlobals().torcher
         with self.cuda_lock:
+            mc = SpeechT5Config.from_pretrained(model, **kwa)
             if get_processor is None:
-               self.processor = SpeechT5Processor.from_pretrained(model)
+               self.processor = SpeechT5Processor.from_pretrained(model, config=mc)
             else:
-                self.processor = get_processor(device, model)
-            mc = SpeechT5Config.from_pretrained(model, max_speech_positions=4000, **kwa)
+                self.processor = get_processor(device, model, config=mc)
             model = maybe_half(SpeechT5ForTextToSpeech.from_pretrained(model,
                                                             config=mc)).to(device)
             model.speecht5.decoder = maybe_half(model.speecht5.decoder)

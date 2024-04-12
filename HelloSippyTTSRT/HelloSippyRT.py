@@ -246,11 +246,11 @@ class HelloSippyRT():
     default_model = "microsoft/speecht5_tts"
     def __init__(self, device, model=default_model, get_processor:Optional[callable]=None):
         with self.cuda_lock:
+            mc = SpeechT5Config.from_pretrained(model)
             if get_processor is None:
-               self.processor = SpeechT5Processor.from_pretrained(model)
+               self.processor = SpeechT5Processor.from_pretrained(model, config=mc)
             else:
-                self.processor = get_processor(device, model)
-            mc = SpeechT5Config.from_pretrained(model, max_speech_positions=4000)
+                self.processor = get_processor(device, model, config=mc)
             model = SpeechT5ForTextToSpeech.from_pretrained(model,
                                                             config=mc).to(device)
             model.eval()
