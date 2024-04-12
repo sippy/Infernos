@@ -29,7 +29,7 @@ from queue import Queue
 
 import ray
 
-from sippy.CCEvents import CCEventTry
+from sippy.CCEvents import CCEventTry, CCEventConnect
 
 from Cluster.RemoteRTPGen import RemoteRTPGen, RTPGenError
 from SIP.InfernUA import InfernUA, model_body, InfernUASFailure
@@ -77,6 +77,11 @@ class InfernUAS(InfernUA):
         self.our_sdp_body = body
         if self.auto_answer:
             self.send_uas_resp()
+
+    def recvEvent(self, event):
+        if not self.auto_answer and isinstance(event, CCEventConnect):
+            return self.send_uas_resp()
+        super().recvEvent(event)
 
     def sess_term(self, ua=None, rtime=None, origin=None, result=0):
         print('disconnected')

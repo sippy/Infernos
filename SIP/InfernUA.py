@@ -39,6 +39,7 @@ from RTP.RTPParams import RTPParams
 
 ULAW_PT = 0
 ULAW_RM = 'PCMU/8000'
+ULAW_PTIME = RTPParams.default_ptime
 body_txt = 'v=0\r\n' + \
   'o=- 380960 380960 IN IP4 192.168.22.95\r\n' + \
   's=-\r\n' + \
@@ -46,7 +47,7 @@ body_txt = 'v=0\r\n' + \
   't=0 0\r\n' + \
  f'm=audio 16474 RTP/AVP {ULAW_PT}\r\n' + \
  f'a=rtpmap:0 {ULAW_RM}\r\n' + \
-  'a=ptime:30\r\n' + \
+ f'a=ptime:{ULAW_PTIME}\r\n' + \
   'a=sendrecv\r\n' + \
   '\r\n'
 model_body = MsgBody(body_txt)
@@ -61,6 +62,7 @@ class InfernUAConf(object):
     laddr = None
     lport = None
     logger = None
+    new_sess_offer: callable = None
 
     def __init__(self):
         self.laddr = SipConf.my_address
@@ -124,7 +126,7 @@ class InfernUA(UA):
     def send_uas_resp(self):
         self.our_sdp_body.content.o_header = SdpOrigin()
         oevent = CCEventConnect((200, 'OK', self.our_sdp_body.getCopy()))
-        return self.recvEvent(oevent)
+        return super().recvEvent(oevent)
 
     def sess_term(self, ua=None, rtime=None, origin=None, result=0):
         print('disconnected')
