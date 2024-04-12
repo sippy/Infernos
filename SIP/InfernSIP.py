@@ -26,6 +26,7 @@
 from typing import Optional
 from weakref import WeakValueDictionary
 from queue import Queue
+from threading import Lock
 
 from sippy.SipConf import SipConf
 from sippy.SipTransactionManager import SipTransactionManager
@@ -33,11 +34,10 @@ from sippy.SipURL import SipURL
 from sippy.SipRegistrationAgent import SipRegistrationAgent
 from sippy.misc import local4remote
 
-from config.InfernGlobals import InfernGlobals as IG
-from .InfernUAS import InfernTTSUAS
+from .InfernUAS import InfernLazyUAS
 from .InfernUAC import InfernUAC
-
-from Core.T2T.Translator import Translator
+from .InfernUA import InfernUA, InfernUAConf
+from .RemoteSession import RemoteSessionOffer, NewRemoteSessionRequest
 
 from utils.tts import human_readable_time, hal_set, smith_set, \
         bender_set
@@ -50,26 +50,24 @@ def bad(*a):
     #ED2.breakLoop(1)
     pass
 
-class InfernSIP(object):
-    _o = None
+class InfernSIP():
+    _o: InfernUAConf
     ua = None
     body = None
     ragent = None
     sip_actr = None
-    tts_actr = None
-    stt_actr = None
     sippy_c = None
     sessions: WeakValueDictionary
-    tts_lang: str
-    stt_lang: str
+    sessions_lock: Lock
 
-    def __init__(self, sip_actr, tts_actr, stt_actr, rtp_actr, iao, tts_lang, stt_lang):
+    def __init__(self, sip_actr, rtp_actr, iao):
         self.sippy_c = {'nh_addr':tuple(iao.nh_addr),
                         '_sip_address':iao.laddr,
                         '_sip_port':iao.lport,
                         '_sip_logger':iao.logger}
-        self.sip_actr, self.tts_actr, self.stt_actr, self.rtp_actr = sip_actr, tts_actr, stt_actr, rtp_actr
+        self.sip_actr, self.rtp_actr = sip_actr, rtp_actr
         self.sessions = WeakValueDictionary()
+        self.session_lock = Lock()
         self._o = iao
         udsc, udsoc = SipTransactionManager.model_udp_server
         udsoc.nworkers = 1
@@ -85,16 +83,16 @@ class InfernSIP(object):
                 user=iao.authname, passw=iao.authpass,
                 rok_cb=good, rfail_cb=bad)
         ragent.rmsg.getHFBody('to').getUrl().username = iao.cld
-        prompts = ['Welcome to Infernos.'] + bender_set(2) + \
-                   smith_set() + hal_set() #+ t900_set()
-        if tts_lang[0] != 'en':
-            tr = IG.get_translator('en', tts_lang[0]).translate
-        else:
-            tr = lambda x: x
-        prompts = [[tr(_p.strip()) for _p in p.split('|')] for p in prompts]
-        prompts = tuple(tuple(p) if len(p) > 1 else p[0] for p in prompts)
-        self.tts_lang, self.stt_lang = tts_lang, stt_lang
-        self.prompts = prompts
+#        prompts = ['Welcome to Infernos.'] + bender_set(2) + \
+#                   smith_set() + hal_set() #+ t900_set()
+#        if tts_lang[0] != 'en':
+#            tr = IG.get_translator('en', tts_lang[0]).translate
+#        else:
+#            tr = lambda x: x
+#        prompts = [[tr(_p.strip()) for _p in p.split('|')] for p in prompts]
+#        prompts = tuple(tuple(p) if len(p) > 1 else p[0] for p in prompts)
+#        self.tts_lang = tts_lang
+#        self.prompts = prompts
         ragent.doregister()
 
     def recvRequest(self, req, sip_t):
@@ -105,20 +103,25 @@ class InfernSIP(object):
             #if self.rserv != None:
             #    return (req.genResponse(486, 'Busy Here'), None, None)
             # New dialog
-            isess = InfernTTSUAS(self, req, sip_t)
-            self.sessions[isess.id] = isess
+            isess = InfernLazyUAS(self, req, sip_t)
+            with self.session_lock:
+                self.sessions[isess.id] = isess
+            rso = RemoteSessionOffer(self, isess)
+            self._o.new_sess_offer(rso)
             return
         return (req.genResponse(501, 'Not Implemented'), None, None)
 
-    def new_session(self, cld:str, rval:Optional[Queue]=None):
-        uac = InfernUAC(self, cld)
-        self.sessions[uac.id] = uac
-        ret = (uac, uac.rsess.get_soundout())
+    def new_session(self, msg:NewRemoteSessionRequest, rval:Optional[Queue]=None):
+        uac = InfernUAC(self, msg)
+        with self.session_lock:
+            self.sessions[uac.id] = uac
+        ret = (uac, uac.rsess)
         if rval is None: return ret
         rval.put(ret)
 
-    def get_session(self, sip_sess_id):
-        return self.sessions[sip_sess_id]
+    def get_session(self, sip_sess_id) -> InfernUA:
+        with self.session_lock:
+            return self.sessions[sip_sess_id]
 
-    def getPrompts(self):
-        return [f'{human_readable_time()}',] + list(self.prompts)
+#    def getPrompts(self):
+#        return [f'{human_readable_time()}',] + list(self.prompts)

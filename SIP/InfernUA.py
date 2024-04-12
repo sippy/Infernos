@@ -134,6 +134,7 @@ class InfernUA(UA):
         self.rsess.join()
         if ua != self:
             self.disconnect()
+        self.rsess = None
 
     def __del__(self):
         if self.debug:

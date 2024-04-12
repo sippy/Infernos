@@ -96,9 +96,14 @@ if __name__ == '__main__':
     iua_c.authname = authname
     iua_c.authpass = authpass
     iua_c.cli = iua_c.cld = authname
-    iua = InfernSIPActor.options(max_concurrency=2).remote(iua_c)
+    from functools import partial
+    from Apps.LiveTranslator.LTActor import LTActor
+    iua = InfernSIPActor.options(max_concurrency=2).remote()
+    lact = LTActor.remote()
+    ray.get(lact.start.remote(iua))
+    iua_c.new_sess_offer = partial(lact.new_sip_session_received.remote)
     try:
-        exit(ray.get(iua.loop.remote()))
+        exit(ray.get(iua.loop.remote(iua_c)))
     except KeyboardInterrupt:
         ray.get(iua.stop.remote())
         raise
