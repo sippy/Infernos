@@ -10,29 +10,22 @@ from RTP.RTPOutputWorker import RTPOutputWorker
 from RTP.InfernRTPIngest import RTPInStream
 from RTP.AudioInput import AudioInput
 from RTP.RTPParams import RTPParams
+from RTP.InfernRTPIngest import InfernRTPIngest
 from Core.AStreamMarkers import ASMarkerGeneric, ASMarkerNewSent
 
 class InfernRTPEPoint():
-    debug = False
-    #devs = ('xpu' if ipex is not None else 'cuda', 'cpu')
-    devs = ('cpu',)
+    debug: bool = True
     id: UUID
     dl_file = None
     firstframe = True
     rtp_params:RTPParams
     rtp_params_lock: Lock
-    def __init__(self, rtp_params:RTPParams, ring):
+    def __init__(self, rtp_params:RTPParams, ring:InfernRTPIngest):
         self.id = uuid4()
         self.rtp_params = rtp_params
         self.rtp_params_lock = Lock()
-        for dev in self.devs:
-            try:
-                self.writer = RTPOutputWorker(dev, rtp_params.out_ptime)
-                self.rsess = RTPInStream(ring, dev)
-            except RuntimeError:
-                if dev == self.devs[-1]: raise
-            else: break
-        self.device = dev
+        self.writer = RTPOutputWorker('cpu', rtp_params.out_ptime)
+        self.rsess = RTPInStream(ring)
         rtp_laddr = local4remote(rtp_params.rtp_target[0])
         rserv_opts = Udp_server_opts((rtp_laddr, 0), self.rtp_received)
         rserv_opts.nworkers = 1
@@ -66,7 +59,7 @@ class InfernRTPEPoint():
             if self.rtp_params.out_ptime != rtp_params.out_ptime:
                 self.writer.end()
                 self.writer.join()
-                self.writer = RTPOutputWorker(self.device, rtp_params.out_ptime)
+                self.writer = RTPOutputWorker('cpu', rtp_params.out_ptime)
                 self.writer_setup()
         self.rsess.stream_update()
 

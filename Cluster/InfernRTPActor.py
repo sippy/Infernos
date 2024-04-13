@@ -15,9 +15,10 @@ from Core.AStreamMarkers import ASMarkerGeneric
 from RTP.AudioInput import AudioInput
 from RTP.RTPParams import RTPParams
 
-@ray.remote(resources={"rtp": 1})
+@ray.remote(num_gpus=0.01, resources={"rtp": 1})
 class InfernRTPActor():
-    device = 'cpu'
+    devices = ('cuda', 'xpu', 'cpu')
+    device: str
     sessions: Dict[UUID, InfernRTPEPoint]
     ring: InfernRTPIngest
     def __init__(self):
@@ -58,7 +59,10 @@ class InfernRTPActor():
         rep.update(rtp_params)
 
     def start(self):
-        self.ring = InfernRTPIngest()
+        for device in self.devices:
+            self.ring = InfernRTPIngest(device)
+            self.device = device
+            break
         self.ring.start()
 
     def loop(self):
