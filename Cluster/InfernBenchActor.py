@@ -21,6 +21,7 @@ from Cluster.InfernSTTActor import InfernSTTActor
 from Cluster.STTSession import STTRequest, STTResult
 from Core.T2T.Translator import Translator
 from Core.AStreamMarkers import ASMarkerNewSent
+from Core.AudioChunk import AudioChunk
 
 from utils.tts import smith_set, bender_set, hal_set
 
@@ -47,11 +48,14 @@ class SoundPreBatcher():
             audio = self.audio if self.audio is not None else []
             audio.append(chunk.audio)
             self.audio = audio
+            self.samplerate = chunk.samplerate
             #print(f'audio: {ts.audio.size()=}')
         else:
             nid = ray.get_runtime_context().get_node_id()
-            self.tts_done(nid)
-            self.deliver(STTRequest(torch.cat(self.audio).numpy(), self.stt_done, self.lang))
+            self.tts_done(nid=nid)
+            audio = torch.cat(self.audio).cpu()
+            chunk = AudioChunk(audio, self.samplerate)
+            self.deliver(STTRequest(chunk, self.stt_done, self.lang))
             self.audio = None
         return (0, False)
 
@@ -232,14 +236,11 @@ class InfernBenchActor():
     default_resources = {'head':1, 'stt': 3, 'tts':3}
     queue: Queue
     sessions: Dict[int, TestSession]
-    def __init__(self, _): pass
+    def __init__(self): pass
 
-    def loop(self):
+    def loop(self, _):
         self.writer = SummaryWriter()
-        lang = 'de'
-        self_actor = ray.get_runtime_context().current_actor
-        batch_size = (self.default_resources['stt'] + self.default_resources['tts']) * 8
-        self.TPS = TPS = TestPipes(self.default_resources['tts'], self.default_resources['stt'], batch_size, lang, self_actor)
+        lang = 'it'
         _prompts = [y for x in smith_set() + bender_set() + hal_set() for y in x.split('|')]
         if lang != 'en':
             tr = Translator('en', lang)
@@ -248,10 +249,13 @@ class InfernBenchActor():
         _prompts.pop(0)
         beval = BEval(lang)
         prompts = [(x, partial(get_embedding, beval.tokenizer, beval.model, x)) for x in _prompts]
-        gen = 4
+        gen = 32
         res, _gen = load_checkpoints(lang, gen+1)
-        reeval(res, beval, gen+1, prompts)
         plotdensity(res)
+        reeval(res, beval, gen+1, prompts)
+        self_actor = ray.get_runtime_context().current_actor
+        batch_size = (self.default_resources['stt'] + self.default_resources['tts']) * 8
+        self.TPS = TPS = TestPipes(self.default_resources['tts'], self.default_resources['stt'], batch_size, lang, self_actor)
         cut_trs = 0.10
         #raise Exception(f'{len(res)=}')
         self.queue = Queue()
@@ -314,11 +318,11 @@ class InfernBenchActor():
                 #raise Exception("BP")
                 plotdensity(res, f'density_plot_end_{gen}')
                 ilen = len(res)
-                res = [r for r in res if r.tot_error < cut_trs]
-                plotdensity(res, f'density_plot_start_{gen+1}')
-                print(f'Cutting from {ilen} to {len(res)}')
-                if len(res) <= target_nspeakers:
-                    break
+                new_res = [r for r in res if r.tot_error < cut_trs]
+                if len(new_res) > target_nspeakers:
+                    print(f'Cutting from {ilen} to {len(new_res)}')
+                    res = new_res
+                    plotdensity(res, f'density_plot_start_{gen+1}')
                 next_ts = _next_ts(res)
                 res = []
                 prompt = None

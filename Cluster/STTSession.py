@@ -6,14 +6,16 @@ from threading import Lock
 
 import torch
 
+from Core.AudioChunk import AudioChunk
+
 class STTRequest():
     lang: str
-    audio: torch.Tensor
+    chunk: AudioChunk
     text_cb: callable
     mode: str = 'transcribe'
     timestamps: bool = False
-    def __init__(self, audio:torch.Tensor, text_cb:callable, lang:str):
-        self.lang, self.audio, self.text_cb = lang, audio, text_cb
+    def __init__(self, chunk:AudioChunk, text_cb:callable, lang:str):
+        self.lang, self.chunk, self.text_cb = lang, chunk, text_cb
 
 class STTResult():
     text: str
@@ -48,7 +50,10 @@ class STTSession():
             del self.stt, self.pending
 
     def soundin(self, req:STTRequest):
-        if self.debug: print(f'STTSession.soundin({len(req.audio)=})')
+        if self.debug: print(f'STTSession.soundin({len(req.chunk.audio)=})')
+        if req.chunk.samplerate != self.stt.sample_rate:
+            req.chunk.resample(self.stt.sample_rate)
+        req.chunk.audio = req.chunk.audio.numpy()
         with self.state_lock:
             if self.busy:
                 self.pending.append(req)

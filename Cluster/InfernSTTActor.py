@@ -1,6 +1,9 @@
 #try: import intel_extension_for_pytorch as ipex
 #except ModuleNotFoundError: ipex = None
 
+from typing import Dict
+from uuid import UUID
+
 import ray
 
 from Cluster.InfernSTTWorker import InfernSTTWorker
@@ -9,7 +12,7 @@ from Cluster.STTSession import STTSession, STTRequest
 @ray.remote(num_gpus=1, resources={"stt": 1})
 class InfernSTTActor():
     debug = False
-    sessions: dict
+    sessions: Dict[UUID, STTSession]
     stt: InfernSTTWorker
 
     def __init__(self):

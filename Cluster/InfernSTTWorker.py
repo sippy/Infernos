@@ -37,7 +37,7 @@ class InfernSTTWorker(InfernBatchedWorker):
     def process_batch(self, wis:List[Tuple[STTRequest, int]]):
         if self.debug:
             print(f'InfernSTTWorker.process_batch: got {len(wis)=}')
-        audios = [wi[0].audio for wi in wis]
+        audios = [wi[0].chunk.audio for wi in wis]
         inputs = self.processor(audios, return_tensors="np", sampling_rate=self.sample_rate)
         features = ctranslate2.StorageView.from_array(inputs.input_features)
         prompt = self.get_prompt(tuple((wi[0].lang, wi[0].mode, wi[0].timestamps) for wi in wis))
@@ -55,7 +55,7 @@ class InfernSTTWorker(InfernBatchedWorker):
         good_results = [(wi[0], wi[1], self.processor.decode(r.sequences_ids[0]), r.no_speech_prob, r.sequences_ids[0])
                             for wi, r in zip(wis, results)]
         for wi, c, r, nsp, t in good_results:
-            duration = Fraction(len(wi.audio), self.sample_rate)
+            duration = Fraction(len(wi.chunk.audio), self.sample_rate)
             # Remove leading and trailing space: "WhitespaceTokenizer adds a space at the beginning?" (copilot)
             if len(r) > 0 and r[0] == ' ': r = r[1:]
             if c is not None: c[:] = (c + t)[:-224]
