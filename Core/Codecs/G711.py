@@ -59,3 +59,6 @@ class G711Codec():
         _pcm_to_ulaw_ct = _pcm_to_ulaw_ct.to(device)
         _ulaw_to_pcm_ct = _ulaw_to_pcm_ct.to(device)
         return self
+
+    def silence(self, nframes:int):
+        return b'\xff' * nframes
