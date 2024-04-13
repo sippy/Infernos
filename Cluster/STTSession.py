@@ -10,6 +10,8 @@ class STTRequest():
     lang: str
     audio: torch.Tensor
     text_cb: callable
+    mode: str = 'transcribe'
+    timestamps: bool = False
     def __init__(self, audio:torch.Tensor, text_cb:callable, lang:str):
         self.lang, self.audio, self.text_cb = lang, audio, text_cb
 
@@ -17,6 +19,7 @@ class STTResult():
     text: str
     no_speech_prob: float
     duration: Fraction
+    offsets: Optional[List]=None
     def __init__(self, text:str, no_speech_prob:float, duration:Fraction):
         self.text = text
         self.no_speech_prob = no_speech_prob

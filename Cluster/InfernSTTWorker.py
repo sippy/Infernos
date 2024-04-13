@@ -40,7 +40,7 @@ class InfernSTTWorker(InfernBatchedWorker):
         audios = [wi[0].audio for wi in wis]
         inputs = self.processor(audios, return_tensors="np", sampling_rate=self.sample_rate)
         features = ctranslate2.StorageView.from_array(inputs.input_features)
-        prompt = self.get_prompt(tuple(wi[0].lang for wi in wis))
+        prompt = self.get_prompt(tuple((wi[0].lang, wi[0].mode, wi[0].timestamps) for wi in wis))
         ctxs = [wi[1] for wi in wis]
         prompt = [(50361,) + tuple(c[:-224]) + (50258,) + p if c else p for c, p in zip(ctxs, prompt)]
         try:
@@ -63,12 +63,12 @@ class InfernSTTWorker(InfernBatchedWorker):
             wi.text_cb(result = res)
 
     @lru_cache(maxsize=16)
-    def get_prompt(self, langs:Tuple[str]):
+    def get_prompt(self, options:Tuple[Tuple[str, str, bool]]):
         prompt = tuple(self.processor.tokenizer.convert_tokens_to_ids(
                 [
                     "<|startoftranscript|>",
                    f"<|{language}|>",
-                    "<|transcribe|>",
-                    "<|notimestamps|>",  # Remove this token to generate timestamps.
-                ]) for language in langs)
+                   f"<|{mode}|>",
+                ] + ([] if timestamps else ["<|notimestamps|>"])
+                ) for language, mode, timestamps in options)
         return prompt
