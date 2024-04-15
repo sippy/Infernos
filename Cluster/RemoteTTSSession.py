@@ -3,6 +3,8 @@ from typing import Optional
 import ray
 from ray.exceptions import RayTaskError
 
+from .TTSSession import TTSRequest
+
 class TTSSessionError(Exception):
     pass
 
@@ -19,5 +21,5 @@ class RemoteTTSSession():
     def end(self):
         return ray.get(self.tts_actr.tts_session_end.remote(self.sess_id))
 
-    def say(self, text, done_cb:Optional[callable]=None, speaker_id=None):
-        return self.tts_actr.tts_session_say.remote(self.sess_id, text, done_cb, speaker_id)
+    def say(self, req:TTSRequest):
+        return self.tts_actr.tts_session_say.remote(rgen_id=self.sess_id, req=req)

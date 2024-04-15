@@ -6,7 +6,7 @@ from uuid import UUID
 
 import ray
 
-from Cluster.TTSSession import TTSSession
+from Cluster.TTSSession import TTSSession, TTSRequest
 from Cluster.InfernTTSWorker import InfernTTSWorker
 
 @ray.remote(num_gpus=1, resources={"tts": 1})
@@ -35,9 +35,9 @@ class InfernTTSActor():
         rgen = self.sessions[rgen_id]
         rgen.start(soundout)
 
-    def tts_session_say(self, rgen_id, text, done_cb:Optional[callable]=None, speaker_id=None):
+    def tts_session_say(self, rgen_id, req:TTSRequest):
         rgen = self.sessions[rgen_id]
-        rgen.say(text, speaker_id, done_cb)
+        rgen.say(req)
 
     def tts_session_end(self, rgen_id):
         rgen = self.sessions[rgen_id]

@@ -39,12 +39,12 @@ from Core.AudioChunk import AudioChunk
 from Cluster.InfernTTSWorker import InfernTTSWorker
 
 class TTSRequest():
-    text: str
-    speaker = None
+    text: Union[str,List[str],Tuple[str]]
+    speaker_id: Optional[int]
     done_cb: Optional[callable]
-    def __init__(self, text:str, speaker, done_cb:Optional[callable]=None):
+    def __init__(self, text:Union[str,List[str],Tuple[str]], speaker_id:Optional[int]=None, done_cb:Optional[callable]=None):
         self.text = text
-        self.speaker = speaker
+        self.speaker_id = speaker_id
         self.done_cb = done_cb
 
 class TTSSession():
@@ -72,19 +72,20 @@ class TTSSession():
             chunk=AudioChunk(chunk, self.tts.output_sr)
         self.soundout(chunk=chunk)
 
-    def say(self, text:Union[str,List[str],Tuple[str]], speaker_id, done_cb:Optional[callable]):
+    def say(self, req:TTSRequest):
         if self.debug:
-            print(f'{monotonic():4.3f}: TTSSession.say: ${text=}, {speaker_id=}, {done_cb=}')
-        if speaker_id is not None:
-            speaker = self.tts.get_voice(speaker_id)
+            print(f'{monotonic():4.3f}: TTSSession.say: ${req.text=}, {req.speaker_id=}, {req.done_cb=}')
+        if req.speaker_id is not None:
+            speaker = self.tts.get_voice(req.speaker_id)
         else:
-            speaker, speaker_id = self.tts.get_rand_voice()
-        if isinstance(text, str): text = (text,)
-        if len(text) > 1:
-            done_cb = partial(self.tts_actr.tts_session_say.remote, rgen_id=self.id, text=text[1:],
-                              speaker_id=speaker_id, done_cb=done_cb)
+            speaker, req.speaker_id = self.tts.get_rand_voice()
+        if isinstance(req.text, str): req.text = (req.text,)
+        text, done_cb = req.text[0], req.done_cb
+        if len(req.text) > 1:
+            req.text.pop(0)
+            done_cb = partial(self.tts_actr.tts_session_say.remote, rgen_id=self.id, req=req)
         soundout = partial(self.sound_dispatch, done_cb=done_cb)
-        req = HelloSippyPlayRequest(self.id, text[0], speaker, soundout)
+        req = HelloSippyPlayRequest(self.id, text, speaker, soundout)
         self.tts.infer(req)
 
     def stop(self):
