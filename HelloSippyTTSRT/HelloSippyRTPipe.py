@@ -70,7 +70,8 @@ class HelloSippyPipeState:
 
     def __init__(self, pp:'HelloSippyRTPipe', req:HelloSippyPlayRequest):
         self.session, self.dispatch = req.session, req.dispatch
-        self.inputs = pp.processor(text=req.text, return_tensors="pt")["input_ids"].to(pp.model.device)
+        text = req.text if pp.cleanup_text is None else pp.cleanup_text(req.text)
+        self.inputs = pp.processor(text=text, return_tensors="pt")["input_ids"].to(pp.model.device)
         self.speaker_embeddings = maybe_half(req.speaker).to(pp.model.device)
         self.encoder_attention_mask = torch.ones_like(self.inputs, dtype=torch.int)
         self.pre_frames = maybe_half(torch.zeros(1, pp.pre_nframes + pp.post_nframes, pp.model.config.num_mel_bins)).to(pp.model.device)
@@ -149,9 +150,11 @@ class HelloSippyRTPipe:
     model_sr: int = 16000
     output_sr: int = 16000
     default_model = "microsoft/speecht5_tts"
+    cleanup_text: Optional[callable] = None
 
     def __init__(self, device, model=default_model, get_processor:Optional[callable]=None, output_sr:int=output_sr, **kwa):
         self.cuda_lock = InfernGlobals().torcher
+        self.cleanup_text = kwa.get('cleanup_text', self.cleanup_text)
         with self.cuda_lock:
             mc = SpeechT5Config.from_pretrained(model, **kwa)
             if get_processor is None:

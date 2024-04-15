@@ -24,9 +24,24 @@ def get_ja_T5Processor(device, model_name):
     feature_extractor = SpeechT5FeatureExtractor.from_pretrained(model_name)
     return SpeechT5Processor(feature_extractor, tokenizer)
 
-lang2model = {'en': {},
-              'it': {'model':'Sandiago21/speecht5_finetuned_voxpopuli_it'},
-              'de': {'model':'JFuellem/speecht5_finetuned_voxpopuli_de'},
+class cleanup_text_eu():
+    replacements = [("Ä", "E"), ("Æ", "E"), ("Ç", "C"), ("É", "E"), ("Í", "I"), ("Ó", "O"), ("Ö", "E"), ("Ü", "Y"), ("ß", "S"),
+        ("à", "a"), ("á", "a"), ("ã", "a"), ("ä", "e"), ("å", "a"), ("ë", "e"), ("í", "i"), ("ï", "i"), ("ð", "o"), ("ñ", "n"),
+        ("ò", "o"), ("ó", "o"), ("ô", "o"), ("ö", "u"), ("ú", "u"), ("ü", "y"), ("ý", "y"), ("Ā", "A"), ("ā", "a"), ("ă", "a"),
+        ("ą", "a"), ("ć", "c"), ("Č", "C"), ("č", "c"), ("ď", "d"), ("Đ", "D"), ("ę", "e"), ("ě", "e"), ("ğ", "g"), ("İ", "I"),
+        ("О", "O"), ("Ł", "L"), ("ń", "n"), ("ň", "n"), ("Ō", "O"), ("ō", "o"), ("ő", "o"), ("ř", "r"), ("Ś", "S"), ("ś", "s"),
+        ("Ş", "S"), ("ş", "s"), ("Š", "S"), ("š", "s"), ("ū", "u"), ("ź", "z"), ("Ż", "Z"), ("Ž", "Z"), ("ǐ", "i"), ("ǐ", "i"),
+        ("ș", "s"), ("ț", "t"), ("ù", "u"),
+    ]
+    r_from, r_to = [''.join(x) for x in zip(*replacements)]
+    replacements = str.maketrans(r_from, r_to)
+
+    def __call__(self, text):
+        return text.translate(self.replacements)
+
+lang2model = {'en': {'cleanup_text':cleanup_text_eu()},
+              'it': {'model':'Sandiago21/speecht5_finetuned_voxpopuli_it', 'cleanup_text':cleanup_text_eu()},
+              'de': {'model':'JFuellem/speecht5_finetuned_voxpopuli_de', 'cleanup_text':cleanup_text_eu()},
               'ru': {'model':'zaebee/speecht5_tts_common_ru'},
               'ja': {'model': 'esnya/japanese_speecht5_tts', 'get_processor': get_ja_T5Processor},
              }
