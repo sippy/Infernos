@@ -1,7 +1,6 @@
 from typing import Tuple, List
 from os.path import expanduser, exists as path_exists
 from subprocess import Popen, PIPE
-from fractions import Fraction
 
 import ctranslate2
 import transformers
@@ -55,11 +54,10 @@ class InfernSTTWorker(InfernBatchedWorker):
         good_results = [(wi[0], wi[1], self.processor.decode(r.sequences_ids[0]), r.no_speech_prob, r.sequences_ids[0])
                             for wi, r in zip(wis, results)]
         for wi, c, r, nsp, t in good_results:
-            duration = Fraction(len(wi.chunk.audio), self.sample_rate)
             # Remove leading and trailing space: "WhitespaceTokenizer adds a space at the beginning?" (copilot)
             if len(r) > 0 and r[0] == ' ': r = r[1:]
             if c is not None: c[:] = (c + t)[:-224]
-            res = STTResult(text=r, no_speech_prob=nsp, duration=duration)
+            res = STTResult(text=r, no_speech_prob=nsp, req=wi)
             wi.text_cb(result = res)
 
     @lru_cache(maxsize=16)

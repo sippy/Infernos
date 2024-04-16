@@ -3,6 +3,7 @@ from uuid import uuid4, UUID
 from fractions import Fraction
 from functools import partial
 from threading import Lock
+from time import monotonic
 
 import torch
 
@@ -14,7 +15,9 @@ class STTRequest():
     text_cb: callable
     mode: str = 'transcribe'
     timestamps: bool = False
+    stime:float
     def __init__(self, chunk:AudioChunk, text_cb:callable, lang:str):
+        self.stime = monotonic()
         self.lang, self.chunk, self.text_cb = lang, chunk, text_cb
 
 class STTResult():
@@ -22,10 +25,12 @@ class STTResult():
     no_speech_prob: float
     duration: Fraction
     offsets: Optional[List]=None
-    def __init__(self, text:str, no_speech_prob:float, duration:Fraction):
+    inf_time: float
+    def __init__(self, text:str, no_speech_prob:float, req:STTRequest):
         self.text = text
         self.no_speech_prob = no_speech_prob
-        self.duration = duration
+        self.duration = Fraction(len(req.chunk.audio), req.chunk.samplerate)
+        self.inf_time = monotonic() - req.stime
 
 class STTSession():
     debug = False
