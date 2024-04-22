@@ -19,3 +19,4 @@ opencensus
 prometheus_client
 py-spy
 nltk
+G722
