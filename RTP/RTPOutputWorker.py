@@ -108,28 +108,31 @@ class RTPOutputWorker(threading.Thread):
                         sleep(float(qtimeout))
                     continue
             else:
-                if isinstance(chunk_n, AudioChunk): self.update_frm_ctrs(rcvd_inc=chunk_n.audio.size(0))
+                #if isinstance(chunk_n, AudioChunk): self.update_frm_ctrs(rcvd_inc=chunk_n.audio.size(0))
                 mix.chunk_in(chunk_n)
                 continue
 
             if stime is None:
                 stime = ctime
 
-            while chunk_o_n.size(0) >= out_fsize:
-                self.update_frm_ctrs(prcsd_inc=out_fsize*2)
-                packet = chunk_o_n[:out_fsize]
-                chunk_o_n = chunk_o_n[out_fsize:]
+            chunk_o_n = self.codec.encode(chunk_o_n)
+            out_psize = self.codec.d2e_frames(out_fsize)
+            while len(chunk_o_n) >= out_psize:
+                #self.update_frm_ctrs(prcsd_inc=out_fsize*2)
+                packet = chunk_o_n[:out_psize]
+                assert len(packet) == out_psize, f'{len(packet)=}, {out_psize=}'
+                chunk_o_n = chunk_o_n[out_psize:]
 
-                ptime += Fraction(len(packet), self.samplerate_out)
+                ptime += Fraction(out_fsize, self.samplerate_out)
                 etime = ctime - stime
 
                 #print(packet.size())
                 #packet = (packet * 20000).to(torch.int16)
                 #packet = packet.byte().cpu().numpy()
-                packet = self.codec.encode(packet)
+                #packet = self.codec.encode(packet)
                 #print('packet', packet.min(), packet.max(), packet[:10])
                 #print(len(packet), packet[:10])
-                pkt = rsynth.next_pkt(out_fsize, out_pt, pload=packet)
+                pkt = rsynth.next_pkt(out_psize, out_pt, pload=packet)
                 if self.pkt_send_f is not None:
                     self.pkt_send_f(pkt)
                 #print(len(pkt))
