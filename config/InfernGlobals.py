@@ -21,8 +21,8 @@ class InfernGlobals():
 
     @staticmethod
     @lru_cache(maxsize=8)
-    def get_resampler(from_sr:int, to_sr:int):
-        return T.Resample(orig_freq=from_sr, new_freq=to_sr)
+    def get_resampler(from_sr:int, to_sr:int, device:str='cpu'):
+        return T.Resample(orig_freq=from_sr, new_freq=to_sr).to(device)
 
     @staticmethod
     @lru_cache(maxsize=8)

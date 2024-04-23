@@ -18,7 +18,7 @@ class AudioChunk():
     def resample(self, sample_rate:int):
         assert sample_rate != self.samplerate
         audio = self.audio.to(torch.float)
-        audio = IG.get_resampler(self.samplerate, sample_rate)(audio).to(self.audio.dtype)
+        audio = IG.get_resampler(self.samplerate, sample_rate, audio.device)(audio).to(self.audio.dtype)
         self.samplerate, self.audio = sample_rate, audio
         return self
 
