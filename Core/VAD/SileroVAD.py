@@ -24,12 +24,14 @@ class VADChannel():
         self.state = VADChannelState(device)
         self.active_buffer = torch.zeros(0).to('cpu')
 
-    def ingest(self, svad:'SileroVADWorker', data: bytes, decode:callable):
+    def ingest(self, svad:'SileroVADWorker', data: bytes, codec):
         self.vad_buffer += data
-        if len(self.vad_buffer) < svad.window_size_samples:
+        if codec.e2d_frames(len(self.vad_buffer), svad.input_sr) < svad.window_size_samples:
             return None
-        chunk = decode(self.vad_buffer[:svad.window_size_samples])
-        self.vad_buffer = self.vad_buffer[svad.window_size_samples:]
+        decode_samples = codec.d2e_frames(svad.window_size_samples, svad.input_sr)
+        chunk = codec.decode(self.vad_buffer[:decode_samples], sample_rate=svad.input_sr)
+        assert chunk.audio.size(0) == svad.window_size_samples, f'{len(chunk).audio.size(0)=} {svad.window_size_samples=}'
+        self.vad_buffer = self.vad_buffer[decode_samples:]
         svad.infer((self, chunk))
         #self.vad_chunk_in(chunk, True)
 

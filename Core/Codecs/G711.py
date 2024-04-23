@@ -58,5 +58,13 @@ class G711Codec():
         _ulaw_to_pcm_ct = _ulaw_to_pcm_ct.to(device)
         return self
 
+    def e2d_frames(self, enframes:int, out_srate:int=default_sr):
+        assert out_srate % self.default_sr == 0
+        return enframes * out_srate // self.default_sr
+
+    def d2e_frames(self, dnframes:int, in_srate:int=default_sr):
+        assert in_srate % self.default_sr == 0
+        return dnframes * self.default_sr // in_srate
+
     def silence(self, nframes:int):
         return b'\xff' * nframes

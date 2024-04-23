@@ -90,7 +90,7 @@ class RTPInStream():
                 if self.npkts < 10:
                     dprint(f"{len(pkt.rtp_data)=}, {type(pkt.rtp_data)=}")
                 rtp_data = pkt.rtp_data
-            self.vchan.ingest(svad, rtp_data, self.codec.decode)
+            self.vchan.ingest(svad, rtp_data, self.codec)
         if self.npkts < 10 and len(res) > 0:
             dprint(f"{res=}")
 
