@@ -1,5 +1,5 @@
-try: import intel_extension_for_pytorch as ipex
-except ModuleNotFoundError: ipex = None
+#try: import intel_extension_for_pytorch as ipex
+#except ModuleNotFoundError: ipex = None
 
 from typing import Dict, Union, Optional
 from uuid import UUID
@@ -17,7 +17,7 @@ from RTP.RTPParams import RTPParams
 
 @ray.remote(num_gpus=0.01, resources={"rtp": 1})
 class InfernRTPActor():
-    devices = ('cuda', 'xpu', 'cpu')
+    devices = ('cuda', 'cpu')
     device: str
     sessions: Dict[UUID, InfernRTPEPoint]
     ring: InfernRTPIngest
@@ -61,9 +61,15 @@ class InfernRTPActor():
     def start(self):
         for device in self.devices:
             self.ring = InfernRTPIngest(device)
+            try:
+                self.ring.start()
+            except AssertionError:
+                print(f'{device} did not worl')
+                continue
             self.device = device
             break
-        self.ring.start()
+        else:
+            raise RuntimeError('No suitable device found')
 
     def loop(self):
         from sippy.Core.EventDispatcher import ED2
