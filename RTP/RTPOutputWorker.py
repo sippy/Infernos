@@ -4,16 +4,14 @@ import queue
 import threading
 from time import monotonic, sleep
 
-import ray
 from rtpsynth.RtpSynth import RtpSynth
-import torch
 import soundfile as sf
 
-from config.InfernGlobals import InfernGlobals as IG
 from Core.Codecs.G711 import G711Codec
 from Core.AudioChunk import AudioChunk
 from Core.OutputMuxer import OutputMTMuxer
 from Core.AStreamMarkers import ASMarkerGeneric
+from RTP.RTPParams import RTPParams
 
 class RTPOutputWorker(threading.Thread):
     data_queue: queue.Queue[Union[AudioChunk, ASMarkerGeneric]]
@@ -26,18 +24,19 @@ class RTPOutputWorker(threading.Thread):
     frames_prcsd = 0
     has_ended = False
     codec: G711Codec
-    samplerate_out: int = G711Codec.default_sr
+    samplerate_out: int
     out_ft: int # in ms
 
-    def __init__(self, device, out_ft):
+    def __init__(self, device, rtp_params:RTPParams):
         self.itime = monotonic()
         self.device = device
         #if os.path.exists(self.ofname):
         #    self.data, _ = sf.read(self.ofname)
         self.data_queue = queue.Queue()
-        self.codec = G711Codec().to(device)
+        self.codec = rtp_params.codec().to(device)
+        self.samplerate_out = self.codec.default_sr
         self.state_lock = threading.Lock()
-        self.out_ft = out_ft
+        self.out_ft = rtp_params.out_ptime
         super().__init__(target=self.consume_audio)
         self.daemon = True
 

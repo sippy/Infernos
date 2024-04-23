@@ -24,8 +24,8 @@ class InfernRTPEPoint():
         self.id = uuid4()
         self.rtp_params = rtp_params
         self.rtp_params_lock = Lock()
-        self.writer = RTPOutputWorker('cpu', rtp_params.out_ptime)
-        self.rsess = RTPInStream(ring)
+        self.writer = RTPOutputWorker('cpu', rtp_params)
+        self.rsess = RTPInStream(ring, rtp_params)
         rtp_laddr = local4remote(rtp_params.rtp_target[0])
         rserv_opts = Udp_server_opts((rtp_laddr, 0), self.rtp_received)
         rserv_opts.nworkers = 1
@@ -59,7 +59,7 @@ class InfernRTPEPoint():
             if self.rtp_params.out_ptime != rtp_params.out_ptime:
                 self.writer.end()
                 self.writer.join()
-                self.writer = RTPOutputWorker('cpu', rtp_params.out_ptime)
+                self.writer = RTPOutputWorker('cpu', rtp_params)
                 self.writer_setup()
         self.rsess.stream_update()
 

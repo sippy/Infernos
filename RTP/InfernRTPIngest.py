@@ -9,6 +9,7 @@ from Core.VAD.SileroVAD import SileroVADWorker, VADChannel
 from Core.Codecs.G711 import G711Codec
 from Core.AudioChunk import AudioChunk
 from RTP.AudioInput import AudioInput
+from RTP.RTPParams import RTPParams
 
 class WIPkt():
     def __init__(self, stream: 'RTPInStream', data, address, rtime):
@@ -36,9 +37,9 @@ class RTPInStream():
     npkts: int = 0
     ain: AudioInput
     ain_lock: Lock
-    def __init__(self, ring:'InfernRTPIngest'):
+    def __init__(self, ring:'InfernRTPIngest', rtp_params:RTPParams):
         self.jbuf = RtpJBuf(self.jb_size)
-        self.codec = G711Codec().to(ring.device)
+        self.codec = rtp_params.codec().to(ring.device)
         self.ring = ring
         self.ain = AudioInput()
         self.ain_lock = Lock()
