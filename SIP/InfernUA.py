@@ -36,6 +36,7 @@ from sippy.SipReason import SipReason
 
 from Cluster.RemoteRTPGen import RemoteRTPGen
 from RTP.RTPParams import RTPParams
+from Core.Codecs.G711 import G711Codec
 
 ULAW_PT = 0
 ULAW_RM = 'PCMU/8000'
@@ -46,8 +47,6 @@ body_txt = 'v=0\r\n' + \
   'c=IN IP4 192.168.22.95\r\n' + \
   't=0 0\r\n' + \
  f'm=audio 16474 RTP/AVP {ULAW_PT}\r\n' + \
- f'a=rtpmap:0 {ULAW_RM}\r\n' + \
- f'a=ptime:{ULAW_PTIME}\r\n' + \
   'a=sendrecv\r\n' + \
   '\r\n'
 model_body = MsgBody(body_txt)
@@ -94,25 +93,26 @@ class InfernUA(UA):
         if p is None: return None
         return p.rtp_target
 
-    def extract_rtp_params(self, sdp_body):
+    def extract_rtp_params(self, sdp_body, accept=(G711Codec,)):
         if sdp_body == None:
             event = InfernUASFailure("late offer/answer is not supported at this time, sorry")
             self.recvEvent(event)
             return
         sdp_body.parse()
-        sects = [s for s in sdp_body.content.sections
-                 if s.m_header.type == MTAudio and
-                 ULAW_PT in s.m_header.formats]
-        if len(sects) == 0:
-            event = InfernUASFailure("only G.711u audio is supported at this time, sorry")
+        try:
+            codec, sect = next((ac, s) for ac in accept for s in sdp_body.content.sections
+                                if s.m_header.type == MTAudio and ac.pt in s.m_header.formats)
+        except StopIteration:
+            event = InfernUASFailure("Unsupported audio codec, sorry")
             self.recvEvent(event)
             return None
-        sect = sects[0]
         try:
             ptime = int(next(x for x in sect.a_headers if x.name == 'ptime').value)
         except StopIteration:
             ptime = None
-        return RTPParams((sect.c_header.addr, sect.m_header.port), ptime)
+        r = RTPParams((sect.c_header.addr, sect.m_header.port), ptime)
+        r.codec = codec
+        return r
 
     def outEvent(self, event, ua):
         if isinstance(event, CCEventUpdate):

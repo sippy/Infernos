@@ -27,13 +27,14 @@ from typing import Optional
 from uuid import uuid4, UUID
 from queue import Queue
 
-import ray
-
 from sippy.CCEvents import CCEventTry, CCEventConnect
+from sippy.SdpMediaDescription import a_header
 
 from Cluster.RemoteRTPGen import RemoteRTPGen, RTPGenError
 from SIP.InfernUA import InfernUA, model_body, InfernUASFailure
 from SIP.RemoteSession import RemoteSessionAccept
+from Core.Codecs.G711 import G711Codec
+from Core.Codecs.G722 import G722Codec
 
 class CCEventSentDone: pass
 class CCEventSTTTextIn:
@@ -58,7 +59,8 @@ class InfernUAS(InfernUA):
             return
         self.etry = event
         cId, cli, cld, sdp_body, auth, caller_name = event.getData()
-        rtp_params = self.extract_rtp_params(sdp_body)
+        accept_codecs = (G722Codec, G711Codec)
+        rtp_params = self.extract_rtp_params(sdp_body, accept=accept_codecs)
         if rtp_params is None:
             event = InfernUASFailure(code=500)
             self.recvEvent(event)
@@ -74,6 +76,9 @@ class InfernUAS(InfernUA):
         body = model_body.getCopy()
         sect = body.content.sections[0]
         sect.c_header.addr, sect.m_header.port = self.rsess.rtp_address
+        sect.a_headers.insert(0, a_header(f'ptime:{rtp_params.out_ptime}'))
+        sect.a_headers.insert(0, a_header(f'rtpmap:{rtp_params.codec.pt} {rtp_params.codec.rm}'))
+        sect.m_header.formats = [rtp_params.codec.pt,]
         self.our_sdp_body = body
         if self.auto_answer:
             self.send_uas_resp()
