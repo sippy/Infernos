@@ -1,9 +1,6 @@
-from typing import Tuple, Dict
 import torch
-import torchaudio.transforms as T
 import audioop
 
-from config.InfernGlobals import InfernGlobals as IG
 from Core.AudioChunk import AudioChunk
 
 _pcm_to_ulaw_ct = torch.zeros(65536, dtype=torch.uint8)
@@ -23,6 +20,7 @@ for i in range(256):
 class G711Codec():
     default_sr:int = 8000
     pt:int = 0 # G.711u
+    rm:str = 'PCMU/8000'
 
     def encode(self, audio_tensor:torch.Tensor):
         # Scale from [-1, 1] to [-32768, 32767]
@@ -31,7 +29,7 @@ class G711Codec():
         # Shift and look up in the conversion table
         audio_ulaw = _pcm_to_ulaw_ct[(audio_scaled + 32768).long()]
 
-        return audio_ulaw
+        return audio_ulaw.cpu().numpy().tobytes()
 
     def decode(self, ulaw_bytes:bytes, resample:bool=True, sample_rate:int=default_sr):
         # Convert byte string to a tensor of uint8

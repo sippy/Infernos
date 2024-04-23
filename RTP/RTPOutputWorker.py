@@ -126,9 +126,8 @@ class RTPOutputWorker(threading.Thread):
                 #print(packet.size())
                 #packet = (packet * 20000).to(torch.int16)
                 #packet = packet.byte().cpu().numpy()
-                packet = self.codec.encode(packet).cpu().numpy()
+                packet = self.codec.encode(packet)
                 #print('packet', packet.min(), packet.max(), packet[:10])
-                packet = packet.tobytes()
                 #print(len(packet), packet[:10])
                 pkt = rsynth.next_pkt(out_fsize, out_pt, pload=packet)
                 if self.pkt_send_f is not None:
