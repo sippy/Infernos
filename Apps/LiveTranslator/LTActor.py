@@ -30,8 +30,8 @@ class LTActor():
     translators: List[callable]
     nstts: int = 0
     def __init__(self):
-        self.tts_langs = ('de', 'en')
-        self.stt_langs = ('ru', 'de')
+        self.tts_langs = ('es', 'en')
+        self.stt_langs = ('ru', 'es')
         self.stt_out_langs = ('en', 'en')
 
     def start(self, sip_actr:InfernSIPActor):
