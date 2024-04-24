@@ -4,6 +4,7 @@ from functools import partial
 import ray
 from ray.exceptions import RayTaskError
 
+from Cluster.InfernRTPActor import RTPSessNotFoundErr
 from RTP.AudioInput import AudioInput
 from RTP.RTPParams import RTPParams
 
@@ -29,8 +30,9 @@ class RemoteRTPGen():
     def soundout(self, chunk):
         self.rtp_actr.rtp_session_soundout.remote(rtp_id=self.sess_id, chunk=chunk)
 
-    def end(self):
-        return self.rtp_actr.rtp_session_end.remote(self.sess_id)
+    def end(self, relaxed:bool=True):
+        return self.rtp_actr.rtp_session_end.remote(self.sess_id, relaxed)
 
     def join(self):
-        return ray.get(self.rtp_actr.rtp_session_join.remote(self.sess_id))
+        try: ray.get(self.rtp_actr.rtp_session_join.remote(self.sess_id))
+        except RTPSessNotFoundErr: pass

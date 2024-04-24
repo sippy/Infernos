@@ -15,6 +15,9 @@ from RTP.InfernRTPEPoint import InfernRTPEPoint
 from Core.AStreamMarkers import ASMarkerGeneric
 from RTP.AudioInput import AudioInput
 from RTP.RTPParams import RTPParams
+from Core.Exceptions.InfernSessNotFoundErr import InfernSessNotFoundErr
+
+class RTPSessNotFoundErr(InfernSessNotFoundErr): pass
 
 @ray.remote(num_gpus=0.01, resources={"rtp": 1})
 class InfernRTPActor():
@@ -33,31 +36,35 @@ class InfernRTPActor():
 
     def rtp_session_connect(self, rtp_id, ain:AudioInput):
         print(f'{IG.stdtss()}: rtp_session_connect[{str(rtp_id)[:6]}]')
-        rep = self.sessions[rtp_id]
+        rep = self._get_session(rtp_id)
         rep.connect(ain)
 
-    def rtp_session_end(self, rtp_id):
+    def rtp_session_end(self, rtp_id, relaxed:bool=False):
         print(f'{IG.stdtss()}: rtp_session_end')
-        rep = self.sessions[rtp_id]
+        try:
+            rep = self._get_session(rtp_id)
+        except RTPSessNotFoundErr:
+            if relaxed: return
+            raise
         rep.writer.end()
 
     def rtp_session_soundout(self, rtp_id, chunk:Union[AudioChunk, ASMarkerGeneric]):
-        rep = self.sessions[rtp_id]
+        rep = self._get_session(rtp_id)
         return rep.soundout(chunk)
 
     def _get_direct_soundout(self, rtp_id):
-        rep = self.sessions[rtp_id]
+        rep = self._get_session(rtp_id)
         return rep.soundout
 
     def rtp_session_join(self, rtp_id):
         print(f'{IG.stdtss()}: rtp_session_join')
-        rep = self.sessions[rtp_id]
+        rep = self._get_session(rtp_id)
         rep.shutdown()
         del self.sessions[rtp_id]
 
     def rtp_session_update(self, rtp_id, rtp_params:RTPParams):
         print(f'{IG.stdtss()}: rtp_session_update')
-        rep = self.sessions[rtp_id]
+        rep = self._get_session(rtp_id)
         rep.update(rtp_params)
 
     def start(self):
@@ -84,3 +91,7 @@ class InfernRTPActor():
     def stop(self):
         from sippy.Core.EventDispatcher import ED2
         ED2.callFromThread(ED2.breakLoop, 0)
+
+    def _get_session(self, rtp_id:UUID) -> InfernRTPEPoint:
+        try: return self.sessions[rtp_id]
+        except KeyError: raise RTPSessNotFoundErr(f'No RTP session found for {rtp_id}')

@@ -1,0 +1,1 @@
+class InfernSessNotFoundErr(Exception): pass

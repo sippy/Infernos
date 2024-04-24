@@ -13,12 +13,15 @@ from Cluster.InfernSTTActor import InfernSTTActor
 from Cluster.STTSession import STTResult
 from SIP.RemoteSession import RemoteSessionOffer
 from Core.T2T.NumbersToWords import NumbersToWords
+from Core.Exceptions.InfernSessNotFoundErr import InfernSessNotFoundErr
 
 from .LTSession import LTSession, VADSignals
 
 def ntw_filter(text, from_code=None, to_code=None, tr=lambda x:x, obj=NumbersToWords()):
     print(f'ntw_filter({from_code=}, {to_code=}, {text=})')
     return obj(tr(text))
+
+class LTSessNotFoundErr(InfernSessNotFoundErr): pass
 
 @ray.remote(resources={"head": 0.5})
 class LTActor():
@@ -55,8 +58,8 @@ class LTActor():
 
     def sess_term(self, sess_id:UUID, sip_sess_id:UUID, relaxed:bool=False):
         try:
-            self.sessions[sess_id].sess_term(sip_sess_id)
-        except KeyError:
+            self._get_session(sess_id).sess_term(sip_sess_id)
+        except LTSessNotFoundErr:
             if not relaxed: raise
             return
         del self.sessions[sess_id]
@@ -64,7 +67,11 @@ class LTActor():
     def text_in(self, sess_id:UUID, result:STTResult):
         self.swriter.add_scalar(f'stt/inf_time', result.inf_time, self.nstts)
         self.nstts += 1
-        self.sessions[sess_id].text_in(result)
+        self._get_session(sess_id).text_in(result)
 
     def tts_say_done(self, sess_id:UUID, direction:int):
-        self.sessions[sess_id].tts_say_done(direction)
+        self._get_session(sess_id).tts_say_done(direction)
+
+    def _get_session(self, sess_id:UUID):
+        try: return self.sessions[sess_id]
+        except KeyError: raise LTSessNotFoundErr(f'No LT session with id {sess_id}')

@@ -2,6 +2,8 @@ from time import monotonic
 
 import ray
 
+from Core.Exceptions.InfernSessNotFoundErr import InfernSessNotFoundErr
+
 class ASMarkerGeneric():
     track_id: int
     debug: bool = False
@@ -21,4 +23,6 @@ class ASMarkerSentDoneCB(ASMarkerNewSent):
     def on_proc(self, tro_self):
         print(f'{monotonic():4.3f}: ASMarkerSentDoneCB.on_proc')
         x = self.done_cb()
-        if self.sync: ray.get(x)
+        if self.sync:
+            try: ray.get(x)
+            except InfernSessNotFoundErr: pass
