@@ -34,7 +34,7 @@ class RTPOutputWorker(threading.Thread):
         #    self.data, _ = sf.read(self.ofname)
         self.data_queue = queue.Queue()
         self.codec = rtp_params.codec().to(device)
-        self.samplerate_out = self.codec.default_sr
+        self.samplerate_out = self.codec.srate
         self.state_lock = threading.Lock()
         self.out_ft = rtp_params.out_ptime
         super().__init__(target=self.consume_audio)
@@ -82,11 +82,11 @@ class RTPOutputWorker(threading.Thread):
         return (self.data_queue.qsize(), False)
 
     def consume_audio(self):
-        out_pt = self.codec.pt
+        out_pt = self.codec.ptype
         out_fsize = self.samplerate_out * self.out_ft // 1000
         ptime = Fraction(0)
         stime = None
-        rsynth = RtpSynth(self.samplerate_out, self.out_ft)
+        rsynth = RtpSynth(self.codec.crate, self.out_ft)
         qtimeout = Fraction(self.out_ft, 1000)
         out_qsize = self.out_ft * (self.samplerate_out // 10 // self.out_ft) # ~0.1 sec (rounded to a frame size)
         mix = OutputMTMuxer(self.samplerate_out, out_qsize, self.device)

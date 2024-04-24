@@ -101,7 +101,7 @@ class InfernUA(UA):
         sdp_body.parse()
         try:
             codec, sect = next((ac, s) for ac in accept for s in sdp_body.content.sections
-                                if s.m_header.type == MTAudio and ac.pt in s.m_header.formats)
+                                if s.m_header.type == MTAudio and ac.ptype in s.m_header.formats)
         except StopIteration:
             event = InfernUASFailure("Unsupported audio codec, sorry")
             self.recvEvent(event)

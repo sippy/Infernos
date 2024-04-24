@@ -31,11 +31,12 @@ class InfernUAC(InfernUA):
         sect.c_header.addr, sect.m_header.port = self.rsess.rtp_address
         sect.a_headers.insert(0, a_header(f'ptime:{rtp_params.out_ptime}'))
         for i, codec in enumerate(self.offer):
-            sect.a_headers.insert(i, a_header(f'rtpmap:{codec.pt} {codec.rm}'))
+            sect.a_headers.insert(i, a_header(codec.rtpmap()))
         self.our_sdp_body = body
         event = CCEventTry((call_id, isip._o.cli, msg.cld, body, None, "Dummy Joe"))
         self.username = isip._o.authname
         self.password = isip._o.authpass
+        self.disc_cbs = (self.sess_term,)
         self.recvEvent(event)
 
     def outEvent(self, event, ua):

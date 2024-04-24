@@ -2,6 +2,7 @@ import torch
 import audioop
 
 from Core.AudioChunk import AudioChunk
+from .GenCodec import GenCodec
 
 _pcm_to_ulaw_ct = torch.zeros(65536, dtype=torch.uint8)
 for i in range(-32768, 32768):
@@ -17,10 +18,9 @@ for i in range(256):
     pcm_value = int.from_bytes(pcm_data, 'little', signed=True)
     _ulaw_to_pcm_ct[i] = pcm_value
 
-class G711Codec():
-    default_sr:int = 8000
-    pt:int = 0 # G.711u
-    rm:str = 'PCMU/8000'
+class G711Codec(GenCodec):
+    ptype = 0 # G.711u
+    ename = 'PCMU'
 
     def encode(self, audio_tensor:torch.Tensor):
         # Scale from [-1, 1] to [-32768, 32767]
@@ -31,7 +31,7 @@ class G711Codec():
 
         return audio_ulaw.cpu().numpy().tobytes()
 
-    def decode(self, ulaw_bytes:bytes, resample:bool=True, sample_rate:int=default_sr):
+    def decode(self, ulaw_bytes:bytes, resample:bool=True, sample_rate:int=GenCodec.srate):
         # Convert byte string to a tensor of uint8
         ulaw_tensor = torch.tensor(list(ulaw_bytes), dtype=torch.uint8)
 
@@ -41,8 +41,8 @@ class G711Codec():
         # Scale from [-32768, 32767] to [-1, 1]
         audio_float = audio_pcm.float() / 32767.0
 
-        chunk = AudioChunk(audio_float, self.default_sr)
-        if resample and sample_rate != self.default_sr:
+        chunk = AudioChunk(audio_float, self.srate)
+        if resample and sample_rate != self.srate:
             chunk.resample(sample_rate)
         return chunk
 
@@ -58,13 +58,13 @@ class G711Codec():
         _ulaw_to_pcm_ct = _ulaw_to_pcm_ct.to(device)
         return self
 
-    def e2d_frames(self, enframes:int, out_srate:int=default_sr):
-        assert out_srate % self.default_sr == 0
-        return enframes * out_srate // self.default_sr
+    def e2d_frames(self, enframes:int, out_srate:int=GenCodec.srate):
+        assert out_srate % self.srate == 0
+        return enframes * out_srate // self.srate
 
-    def d2e_frames(self, dnframes:int, in_srate:int=default_sr):
-        assert in_srate % self.default_sr == 0
-        return dnframes * self.default_sr // in_srate
+    def d2e_frames(self, dnframes:int, in_srate:int=GenCodec.srate):
+        assert in_srate % self.srate == 0
+        return dnframes * self.srate // in_srate
 
     def silence(self, nframes:int):
         return b'\xff' * nframes

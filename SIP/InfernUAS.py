@@ -45,6 +45,7 @@ class InfernUAS(InfernUA):
     rsess: Optional[RemoteRTPGen] = None
     etry: Optional[CCEventTry] = None
     auto_answer: bool
+    accept_codecs = (G722Codec, G711Codec)
     def __init__(self, isip, req, sip_t, auto_answer=True):
         super().__init__(isip)
         assert sip_t.noack_cb is None
@@ -59,8 +60,7 @@ class InfernUAS(InfernUA):
             return
         self.etry = event
         cId, cli, cld, sdp_body, auth, caller_name = event.getData()
-        accept_codecs = (G722Codec, G711Codec)
-        rtp_params = self.extract_rtp_params(sdp_body, accept=accept_codecs)
+        rtp_params = self.extract_rtp_params(sdp_body, accept=self.accept_codecs)
         if rtp_params is None:
             event = InfernUASFailure(code=500)
             self.recvEvent(event)
@@ -77,8 +77,8 @@ class InfernUAS(InfernUA):
         sect = body.content.sections[0]
         sect.c_header.addr, sect.m_header.port = self.rsess.rtp_address
         sect.a_headers.insert(0, a_header(f'ptime:{rtp_params.out_ptime}'))
-        sect.a_headers.insert(0, a_header(f'rtpmap:{rtp_params.codec.pt} {rtp_params.codec.rm}'))
-        sect.m_header.formats = [rtp_params.codec.pt,]
+        sect.a_headers.insert(0, a_header(rtp_params.codec.rtpmap()))
+        sect.m_header.formats = [rtp_params.codec.ptype,]
         self.our_sdp_body = body
         if self.auto_answer:
             self.send_uas_resp()
@@ -87,10 +87,6 @@ class InfernUAS(InfernUA):
         if not self.auto_answer and isinstance(event, CCEventConnect):
             return self.send_uas_resp()
         super().recvEvent(event)
-
-    def sess_term(self, ua=None, rtime=None, origin=None, result=0):
-        print('disconnected')
-        super().sess_term(ua=ua, rtime=rtime, origin=origin, result=result)
 
 class InfernLazyUAS(InfernUAS):
     id: UUID
