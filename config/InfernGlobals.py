@@ -1,6 +1,7 @@
 from safetorch.InfernTorcher import InfernTorcher
 from threading import Lock
 from functools import lru_cache
+from time import monotonic
 
 import torchaudio.transforms as T
 
@@ -28,3 +29,6 @@ class InfernGlobals():
     @lru_cache(maxsize=8)
     def get_translator(from_lang:str, to_lang:str, **kwa):
         return Translator(from_lang, to_lang, **kwa)
+
+    def stdtss():
+        return f'{monotonic():4.3f}'

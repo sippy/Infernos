@@ -106,7 +106,7 @@ class SessionInfo():
                                    AudioInput(vad_chunk_in=vad_handler))
         ysoundout = partial(yua.rtp_actr.rtp_session_soundout.remote, yua.rtp_sess_id)
         self.rsess_connect = partial(xua.rtp_actr.rtp_session_connect.remote, xua.rtp_sess_id,
-                                     AudioInput(ysoundout, vad_handler))
+                                     AudioInput(yua.rtp_sess_id, vad_handler))
         self.translator = xua.translator
         self.get_speaker = (lambda: None) if xua.speakers is None else partial(choice, xua.speakers)
         self.sip_sess_term = partial(lta.sip_actr.sess_term.remote, xua.sip_sess_id)
@@ -211,7 +211,7 @@ class LTSession():
         text = sent_tokenize(text)
         out_sents = [text.pop(0),]
         for t in text:
-            if len(out_sents[-1]) + len(t) < 128:
+            if len(out_sents[-1]) + len(t) < 128 or out_sents[-1].endswith(' i.e.'):
                 out_sents[-1] += ' ' + t
             else:
                 out_sents.append(t)

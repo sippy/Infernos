@@ -2,12 +2,13 @@
 #except ModuleNotFoundError: ipex = None
 
 from typing import Dict, Union, Optional
+from functools import partial
 from uuid import UUID
-from time import monotonic
 from _thread import get_ident
 
 from ray import ray
 
+from config.InfernGlobals import InfernGlobals as IG
 from Core.AudioChunk import AudioChunk
 from RTP.InfernRTPIngest import InfernRTPIngest
 from RTP.InfernRTPEPoint import InfernRTPEPoint
@@ -24,37 +25,38 @@ class InfernRTPActor():
     def __init__(self):
         self.sessions = {}
 
-    def stdtss(self):
-        return f'{monotonic():4.3f}'
-
     def new_rtp_session(self, rtp_params:RTPParams):
-        print(f'{self.stdtss()}: new_rtp_session')
-        rep = InfernRTPEPoint(rtp_params, self.ring)
+        print(f'{IG.stdtss()}: new_rtp_session')
+        rep = InfernRTPEPoint(rtp_params, self.ring, self._get_direct_soundout)
         self.sessions[rep.id] = rep
         return (rep.id, rep.rserv.uopts.laddress)
 
     def rtp_session_connect(self, rtp_id, ain:AudioInput):
-        print(f'{self.stdtss()}: rtp_session_connect[{str(rtp_id)[:6]}]')
+        print(f'{IG.stdtss()}: rtp_session_connect[{str(rtp_id)[:6]}]')
         rep = self.sessions[rtp_id]
         rep.connect(ain)
 
     def rtp_session_end(self, rtp_id):
-        print(f'{self.stdtss()}: rtp_session_end')
+        print(f'{IG.stdtss()}: rtp_session_end')
         rep = self.sessions[rtp_id]
         rep.writer.end()
 
     def rtp_session_soundout(self, rtp_id, chunk:Union[AudioChunk, ASMarkerGeneric]):
         rep = self.sessions[rtp_id]
-        return rep.soundout(chunk, self.stdtss)
+        return rep.soundout(chunk)
+
+    def _get_direct_soundout(self, rtp_id):
+        rep = self.sessions[rtp_id]
+        return rep.soundout
 
     def rtp_session_join(self, rtp_id):
-        print(f'{self.stdtss()}: rtp_session_join')
+        print(f'{IG.stdtss()}: rtp_session_join')
         rep = self.sessions[rtp_id]
         rep.shutdown()
         del self.sessions[rtp_id]
 
     def rtp_session_update(self, rtp_id, rtp_params:RTPParams):
-        print(f'{self.stdtss()}: rtp_session_update')
+        print(f'{IG.stdtss()}: rtp_session_update')
         rep = self.sessions[rtp_id]
         rep.update(rtp_params)
 

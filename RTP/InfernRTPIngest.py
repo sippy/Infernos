@@ -1,6 +1,7 @@
 from typing import Optional, Union
 from queue import Queue
 from threading import Lock
+from uuid import UUID
 
 from rtpsynth.RtpJBuf import RtpJBuf, RTPFrameType, RTPParseError
 
@@ -37,10 +38,12 @@ class RTPInStream():
     npkts: int = 0
     ain: AudioInput
     ain_lock: Lock
-    def __init__(self, ring:'InfernRTPIngest', rtp_params:RTPParams):
+    get_direct_soundout: callable
+    def __init__(self, ring:'InfernRTPIngest', rtp_params:RTPParams, get_direct_soundout:callable):
         self.jbuf = RtpJBuf(self.jb_size)
         self.codec = rtp_params.codec().to(ring.device)
         self.ring = ring
+        self.get_direct_soundout = get_direct_soundout
         self.ain = AudioInput()
         self.ain_lock = Lock()
         self.vchan = VADChannel(self.audio_chunk_out, self.vad_chunk_out, self.codec.decode, ring.device)
@@ -53,6 +56,8 @@ class RTPInStream():
         self.ring.pkt_queue.put(WIStreamUpdate(self))
 
     def stream_connect(self, ain:AudioInput):
+        if isinstance(ain.vad_chunk_in, UUID): ain.vad_chunk_in = self.get_direct_soundout(ain.vad_chunk_in)
+        if isinstance(ain.audio_in, UUID): ain.audio_in = self.get_direct_soundout(ain.audio_in)
         self.ring.pkt_queue.put(WIStreamConnect(self, ain))
 
     def _proc_in_tread(self, wi:Union[WIPkt,WIStreamUpdate], svad:SileroVADWorker):
