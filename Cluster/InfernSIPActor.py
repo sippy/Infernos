@@ -4,6 +4,7 @@ from queue import Queue
 
 import ray
 
+#from Core.InfernConfig import InfernConfig
 from SIP.InfernSIP import InfernSIP
 from SIP.RemoteSession import RemoteSessionAccept, NewRemoteSessionRequest
 from Cluster.InfernRTPActor import InfernRTPActor
@@ -12,13 +13,14 @@ from Cluster.InfernRTPActor import InfernRTPActor
 class InfernSIPActor():
     sip_stack: InfernSIP
     default_resources = {'head':1, 'stt': 1, 'tts':1, 'rtp': 1}
-    def loop(self, iao):
+    def loop(self, inf_c:'InfernConfig'):
+        #raise Exception("BP")
         from sippy.Core.EventDispatcher import ED2
         ED2.my_ident = get_ident()
         rtp_actr = self.rtp_actr = InfernRTPActor.options(max_concurrency=2).remote()
         sip_actr = ray.get_runtime_context().current_actor
         ray.get(rtp_actr.start.remote())
-        self.sip_stack = InfernSIP(sip_actr, rtp_actr, iao)
+        self.sip_stack = InfernSIP(sip_actr, rtp_actr, inf_c)
         rtp_actr.loop.remote()
         rval = ED2.loop()
         ray.get(rtp_actr.stop.remote())

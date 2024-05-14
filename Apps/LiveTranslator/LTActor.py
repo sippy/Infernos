@@ -30,11 +30,12 @@ class LTActor():
     translators: List[callable]
     nstts: int = 0
     def __init__(self):
-        self.tts_langs = ('it', 'en')
-        self.stt_langs = ('en', 'it')
         self.stt_out_langs = ('en', 'en')
 
-    def start(self, sip_actr:InfernSIPActor):
+    def start(self, lt_prof: 'LTProfile', sip_actr:InfernSIPActor):
+        self.lt_prof = lt_prof
+        self.tts_langs = lt_prof.tts_langs
+        self.stt_langs = lt_prof.stt_langs
         nltk.download('punkt')
         self.lt_actr = ray.get_runtime_context().current_actor
         self.sip_actr = sip_actr

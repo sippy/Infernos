@@ -33,6 +33,7 @@ from sippy.SdpMediaDescription import a_header
 from Cluster.RemoteRTPGen import RemoteRTPGen, RTPGenError
 from SIP.InfernUA import InfernUA, model_body, InfernUASFailure
 from SIP.RemoteSession import RemoteSessionAccept
+from SIP.InfernSIPProfile import InfernSIPProfile
 from Core.Codecs.G711 import G711Codec
 from Core.Codecs.G722 import G722Codec
 
@@ -90,9 +91,10 @@ class InfernUAS(InfernUA):
 
 class InfernLazyUAS(InfernUAS):
     id: UUID
-    def __init__(self, sip_stack:'InfernSIP', req, sip_t):
+    def __init__(self, sip_stack:'InfernSIP', sip_prof:InfernSIPProfile, req, sip_t):
         self._id = self.id = uuid4()
         self._sip_stack = sip_stack
+        self._sip_prof = sip_prof
         self._req = req
         self._sip_t = sip_t
         sip_t.cancel_cb = self.cancelled

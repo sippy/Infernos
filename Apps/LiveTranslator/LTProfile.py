@@ -29,5 +29,5 @@ class LTProfile():
     def getActor(self, iconf:'InfernConfig', sip_act:InfernSIPActor):
         if self.actor is None:
             self.actor = LTActor.remote()
-            ray.get(self.actor.start.remote(sip_act))
+            ray.get(self.actor.start.remote(self, sip_act))
         return self.actor

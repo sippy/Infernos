@@ -16,6 +16,8 @@ from Core.T2T.Translator import Translator
 from SIP.RemoteSession import RemoteSessionOffer, RemoteSessionAccept, NewRemoteSessionRequest
 from Core.AStreamMarkers import ASMarkerNewSent
 
+#from .LTProfile import LTProfile
+
 import pickle
 import gzip
 from random import choice
@@ -159,9 +161,11 @@ class LTSession():
     say_buffer: Dict[int, List[TTSRequest]]
 
     def __init__(self, lta, new_sess:RemoteSessionOffer):
+
         self.id = uuid4()
         self.say_buffer = {0:[], 1:[]}
-        dest_number = '16047861714'
+        lt_prof: 'LTProfile' = lta.lt_prof
+        dest_number = dict(x.split('=', 1) for x in lt_prof.outbount_params.split(';'))['cld']
         #dest_number = '205'
         #dest_number = '601'
         sess_term_alice = partial(_sess_term, sterm=lta.lt_actr.sess_term.remote, sess_id=self.id, sip_sess_id=new_sess.sip_sess_id)
@@ -172,7 +176,7 @@ class LTSession():
             print(f'Failed to accept {new_sess.sip_sess_id=}')
             return
         sess_term_bob = partial(_sess_term, sterm=lta.lt_actr.sess_term.remote, sess_id=self.id, sip_sess_id=None)
-        bmsg = NewRemoteSessionRequest(cld=dest_number, disc_cb=sess_term_bob)
+        bmsg = NewRemoteSessionRequest(cld=dest_number, sip_prof=lt_prof.outbound_conn, disc_cb=sess_term_bob)
         bmsg.conn_sip_sess_id = new_sess.sip_sess_id
         sip_sess_id_bob = lta.sip_actr.new_sess.remote(msg=bmsg)
         ssess = [lta.stt_actr.new_stt_session.remote(keep_context=True) for _ in lta.stt_langs]

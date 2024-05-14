@@ -23,7 +23,7 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 # SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-from typing import Optional
+from typing import Optional, Dict
 from weakref import WeakValueDictionary
 from queue import Queue
 from threading import Lock
@@ -34,9 +34,12 @@ from sippy.SipURL import SipURL
 from sippy.SipRegistrationAgent import SipRegistrationAgent
 from sippy.misc import local4remote
 
+#from Core.InfernConfig import InfernConfig
+
 from .InfernUAS import InfernLazyUAS
 from .InfernUAC import InfernUAC
-from .InfernUA import InfernUA, InfernUAConf
+from .InfernUA import InfernUA, InfernSIPConf
+from .InfernSIPProfile import InfernSIPProfile
 from .RemoteSession import RemoteSessionOffer, NewRemoteSessionRequest
 
 from utils.tts import human_readable_time, hal_set, smith_set, \
@@ -51,7 +54,7 @@ def bad(*a):
     pass
 
 class InfernSIP():
-    _o: InfernUAConf
+    _c: Dict[str, InfernSIPProfile]
     ua = None
     body = None
     ragent = None
@@ -60,40 +63,33 @@ class InfernSIP():
     sessions: WeakValueDictionary
     sessions_lock: Lock
 
-    def __init__(self, sip_actr, rtp_actr, iao):
-        self.sippy_c = {'nh_addr':tuple(iao.nh_addr),
-                        '_sip_address':iao.laddr,
-                        '_sip_port':iao.lport,
-                        '_sip_logger':iao.logger}
+    def __init__(self, sip_actr:'InfernSIPActor', rtp_actr, inf_c:'InfernConfig'):
+        sip_c = inf_c.sip_conf
+        self.sippy_c = {'_sip_address':sip_c.laddr,
+                        '_sip_port':sip_c.lport,
+                        '_sip_logger':sip_c.logger}
         self.sip_actr, self.rtp_actr = sip_actr, rtp_actr
         self.sessions = WeakValueDictionary()
         self.session_lock = Lock()
-        self._o = iao
         udsc, udsoc = SipTransactionManager.model_udp_server
         udsoc.nworkers = 1
         SipConf.my_uaname = 'Infernos'
         stm =  SipTransactionManager(self.sippy_c, self.recvRequest)
         self.sippy_c['_sip_tm'] = stm
-        proxy, port = self.sippy_c['nh_addr']
-        aor = SipURL(username = iao.cli, host = proxy, port = port)
-        caddr = local4remote(proxy)
-        cport = self.sippy_c['_sip_port']
-        contact = SipURL(username = iao.cli, host = caddr, port = cport)
-        ragent = SipRegistrationAgent(self.sippy_c, aor, contact,
-                user=iao.authname, passw=iao.authpass,
-                rok_cb=good, rfail_cb=bad)
-        ragent.rmsg.getHFBody('to').getUrl().username = iao.cld
-#        prompts = ['Welcome to Infernos.'] + bender_set(2) + \
-#                   smith_set() + hal_set() #+ t900_set()
-#        if tts_lang[0] != 'en':
-#            tr = IG.get_translator('en', tts_lang[0]).translate
-#        else:
-#            tr = lambda x: x
-#        prompts = [[tr(_p.strip()) for _p in p.split('|')] for p in prompts]
-#        prompts = tuple(tuple(p) if len(p) > 1 else p[0] for p in prompts)
-#        self.tts_lang = tts_lang
-#        self.prompts = prompts
-        ragent.doregister()
+        #raise Exception(f'{inf_c.connectors}')
+        self._c = inf_c.connectors
+        for n, v in self._c.items():
+            if not v.register: continue
+            proxy, port = v.nh_addr
+            aor = SipURL(username = v.cli, host = proxy, port = port)
+            caddr = local4remote(proxy)
+            cport = self.sippy_c['_sip_port']
+            contact = SipURL(username = v.cli, host = caddr, port = cport)
+            ragent = SipRegistrationAgent(self.sippy_c, aor, contact,
+                    user=v.authname, passw=v.authpass,
+                    rok_cb=good, rfail_cb=bad)
+            ragent.rmsg.getHFBody('to').getUrl().username = v.cli
+            ragent.doregister()
 
     def recvRequest(self, req, sip_t):
         if req.getMethod() in ('NOTIFY', 'PING'):
@@ -103,11 +99,18 @@ class InfernSIP():
             #if self.rserv != None:
             #    return (req.genResponse(486, 'Busy Here'), None, None)
             # New dialog
-            isess = InfernLazyUAS(self, req, sip_t)
+            source = req.getSource()
+            for n, sip_prof in self._c.items():
+                assert type(source) == type(sip_prof.nh_addr)
+                if source == sip_prof.nh_addr:
+                    break
+            else:
+                return (req.genResponse(500, 'Nobody is home'), None, None)
+            isess = InfernLazyUAS(self, sip_prof, req, sip_t)
             with self.session_lock:
                 self.sessions[isess.id] = isess
             rso = RemoteSessionOffer(self, isess)
-            self._o.new_sess_offer(rso)
+            sip_prof.new_sess_offer(rso)
             return
         return (req.genResponse(501, 'Not Implemented'), None, None)
 

@@ -52,16 +52,8 @@ body_txt = 'v=0\r\n' + \
 model_body = MsgBody(body_txt)
 model_body.parse()
 
-class InfernUAConf(object):
-    cli = 'infernos_uas'
-    cld = 'infernos_uac'
-    authname = None
-    authpass = None
-    nh_addr = ('192.168.0.102', 5060)
-    laddr = None
-    lport = None
+class InfernSIPConf(object):
     logger = None
-    new_sess_offer: callable = None
 
     def __init__(self):
         self.laddr = SipConf.my_address
@@ -83,10 +75,10 @@ class InfernUA(UA):
     rsess: RemoteRTPGen
     our_sdp_body: MsgBody
 
-    def __init__(self, isip):
+    def __init__(self, isip, nh_address=None):
         self.id = uuid4()
         self.sip_actr, self.rtp_actr = isip.sip_actr, isip.rtp_actr
-        super().__init__(isip.sippy_c, self.outEvent, nh_address=isip.sippy_c['nh_addr'])
+        super().__init__(isip.sippy_c, self.outEvent, nh_address=nh_address)
 
     def extract_rtp_target(self, sdp_body):
         p = self.extract_rtp_params(sdp_body)

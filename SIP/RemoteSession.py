@@ -2,6 +2,8 @@ from typing import Optional
 from functools import partial
 from uuid import UUID
 
+from .InfernSIPProfile import InfernSIPProfile
+
 class RemoteSessionOffer():
     sip_sess_id: UUID
     accept: callable
@@ -19,7 +21,8 @@ class RemoteSessionAccept():
 
 class NewRemoteSessionRequest():
     cld:str
+    sip_prof: InfernSIPProfile
     disc_cb: Optional[callable] = None
     conn_sip_sess_id: Optional[UUID] = None
-    def __init__(self, cld:str, disc_cb:Optional[callable]=None):
-        self.cld, self.disc_cb = cld, disc_cb
+    def __init__(self, cld:str, sip_prof:InfernSIPProfile, disc_cb:Optional[callable]=None):
+        self.cld, self.disc_cb, self.sip_prof = cld, disc_cb, sip_prof

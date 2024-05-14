@@ -84,7 +84,7 @@ class InfernTTSWorker(InfernBatchedWorker):
 
     def handle_runtime_error(self, e, state, wis:List[HelloSippyPlayRequest]):
         print(f'InfernTTSWorker.handle_runtime_error: {e}')
-        affected = [(d, w) for d, w in zip(state.dispatch, wis) if d is not None]
+        affected = [(d, w) for d, w in zip(state, wis) if d.dispatch is not None]
 
     def get_voice(self, *args):
         return self.tts_engine.get_voice(*args)

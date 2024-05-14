@@ -35,6 +35,7 @@ schema = {
                             'regex': r'^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}(:[1-9][0-9]{0,4}|:0)?$',
                             'check_with': validate_port_range
                         },
+                        'aor': {'type': 'string'},
                         'username': {'type': 'string'},
                         'password': {'type': 'string'},
                         'register': {'type': 'boolean'},
@@ -84,7 +85,6 @@ def validate_yaml(filename):
     return data
 
 from Cluster.InfernSIPActor import InfernSIPActor
-from Apps.LiveTranslator.LTProfile import LTProfile
 from SIP.InfernUA import InfernSIPConf
 from SIP.InfernSIPProfile import InfernSIPProfile
 
@@ -92,8 +92,9 @@ class InfernConfig():
     sip_actr: InfernSIPActor
     sip_conf: InfernSIPConf
     connectors: Dict[str, InfernSIPProfile]
-    apps: Dict[str, LTProfile]
+    apps: Dict[str, 'LTProfile']
     def __init__(self, filename: str):
+        from Apps.LiveTranslator.LTProfile import LTProfile
         d = validate_yaml(filename)
         self.sip_conf = InfernSIPConf()
         try:

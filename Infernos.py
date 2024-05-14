@@ -8,8 +8,9 @@ from sippy.SipLogger import SipLogger
 
 sys.path.append('.')
 
-from SIP.InfernUA import InfernUAConf
+from SIP.InfernUA import InfernSIPConf
 from Cluster.InfernSIPActor import InfernSIPActor
+from Core.InfernConfig import InfernConfig
 
 def patch_signals():
     import threading
@@ -28,12 +29,10 @@ def patch_signals():
 
 if __name__ == '__main__':
     try:
-        opts, args = getopt(sys.argv[1:], 'fl:p:n:L:s:u:P:i:')
+        opts, args = getopt(sys.argv[1:], 'fL:i:')
     except GetoptError:
-        print('usage: Infernos.py [-l addr] [-p port] [-n addr] [-f] [-L logfile] [-u authname [-P authpass]]\n' \
-          '                   [-i pidfile]')
+        print('usage: Infernos.py [-f] [-L logfile] [-i pidfile] config.yaml')
         sys.exit(1)
-    sdev = None
     idir = os.path.realpath(sys.argv[0])
     idir = os.path.dirname(idir)
     sys.path.append(idir)
@@ -41,33 +40,22 @@ if __name__ == '__main__':
     authpass = None
     logfile = '/var/log/Infernos.log'
     pidfile = None
-    iua_c = InfernUAConf()
     foreground = False
     for o, a in opts:
         if o == '-f':
             foreground = True
-        elif o == '-l':
-            iua_c.laddr = a
-        elif o == '-p':
-            iua_c.lport = int(a)
         elif o == '-L':
             logfile = a
-        elif o == '-n':
-            if a.startswith('['):
-                parts = a.split(']', 1)
-                iua_c.nh_addr = [parts[0] + ']', 5060]
-                parts = parts[1].split(':', 1)
-            else:
-                parts = a.split(':', 1)
-                iua_c.nh_addr = [parts[0], 5060]
-            if len(parts) == 2:
-                iua_c.nh_addr[1] = int(parts[1])
-        elif o == '-s':
-            sdev = a
-        elif o == '-u':
-            authname = a
-        elif o == '-P':
-            authpass = a
+#        elif o == '-n':
+#            if a.startswith('['):
+#                parts = a.split(']', 1)
+#                iua_c.nh_addr = [parts[0] + ']', 5060]
+#                parts = parts[1].split(':', 1)
+#            else:
+#                parts = a.split(':', 1)
+#                iua_c.nh_addr = [parts[0], 5060]
+#            if len(parts) == 2:
+#                iua_c.nh_addr[1] = int(parts[1])
         elif o == '-i':
             pidfile = a
 
@@ -88,22 +76,15 @@ if __name__ == '__main__':
         if str(ex).index('connecting to an existing cluster') < 0: raise ex
         ray.init()
 
+    inf_c = InfernConfig('config.yaml')
+
     if pidfile != None:
         open(pidfile, 'w').write('%d' % os.getpid())
 
-    iua_c.logger = SipLogger('Infernos',  logfile = os.path.expanduser('~/.Infernos.log'))
+    inf_c.sip_conf.logger = SipLogger('Infernos',  logfile = os.path.expanduser('~/.Infernos.log'))
 
-    iua_c.authname = authname
-    iua_c.authpass = authpass
-    iua_c.cli = iua_c.cld = authname
-    from functools import partial
-    from Apps.LiveTranslator.LTActor import LTActor
-    iua = InfernSIPActor.options(max_concurrency=2).remote()
-    lact = LTActor.remote()
-    ray.get(lact.start.remote(iua))
-    iua_c.new_sess_offer = partial(lact.new_sip_session_received.remote)
     try:
-        exit(ray.get(iua.loop.remote(iua_c)))
+        exit(ray.get(inf_c.sip_actr.loop.remote(inf_c)))
     except KeyboardInterrupt:
-        ray.get(iua.stop.remote())
+        ray.get(inf_c.sip_actr.stop.remote())
         raise
