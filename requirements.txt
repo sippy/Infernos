@@ -20,3 +20,5 @@ py-spy
 nltk
 G722
 rtpsynth
+cerberus
+pyyaml
