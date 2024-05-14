@@ -23,15 +23,15 @@ def ntw_filter(text, from_code=None, to_code=None, tr=lambda x:x, obj=NumbersToW
 
 class LTSessNotFoundErr(InfernSessNotFoundErr): pass
 
-@ray.remote(resources={"head": 0.5})
+@ray.remote(resources={"live_translator": 1})
 class LTActor():
     sessions: Dict[UUID, LTSession]
     vds: Optional[VADSignals]=None
     translators: List[callable]
     nstts: int = 0
     def __init__(self):
-        self.tts_langs = ('es', 'en')
-        self.stt_langs = ('ru', 'es')
+        self.tts_langs = ('it', 'en')
+        self.stt_langs = ('en', 'it')
         self.stt_out_langs = ('en', 'en')
 
     def start(self, sip_actr:InfernSIPActor):
