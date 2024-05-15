@@ -44,6 +44,7 @@ lang2model = {'en': {'cleanup_text':cleanup_text_eu()},
               'es': {'model':'Sandiago21/speecht5_finetuned_facebook_voxpopuli_spanish', 'cleanup_text':cleanup_text_eu()},
               'fr': {'model':'Sandiago21/speecht5_finetuned_facebook_voxpopuli_french', 'cleanup_text':cleanup_text_eu()},
               'de': {'model':'JFuellem/speecht5_finetuned_voxpopuli_de', 'cleanup_text':cleanup_text_eu()},
+              'pt': {'model':'evertonaleixo/speecht5_finetuned_fleurs_ptbr', 'cleanup_text':cleanup_text_eu()},
               'ru': {'model':'zaebee/speecht5_tts_common_ru'},
               'ja': {'model': 'esnya/japanese_speecht5_tts', 'get_processor': get_ja_T5Processor},
              }
