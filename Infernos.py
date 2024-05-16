@@ -70,6 +70,9 @@ if __name__ == '__main__':
         lfile = open(logfile, 'a')
 
     default_resources = InfernSIPActor.default_resources
+    default_resources['live_translator'] = 1
+    default_resources['tts'] = 2
+    default_resources['stt'] = 1
     try:
         ray.init(num_gpus=1, resources = default_resources)
     except ValueError as ex:

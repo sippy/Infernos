@@ -9,7 +9,7 @@ import ray
 from Cluster.InfernSTTWorker import InfernSTTWorker
 from Cluster.STTSession import STTSession, STTRequest
 
-@ray.remote(num_gpus=1, resources={"stt": 1})
+@ray.remote(num_gpus=0.25, resources={"stt": 1})
 class InfernSTTActor():
     debug = False
     sessions: Dict[UUID, STTSession]
