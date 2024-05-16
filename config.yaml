@@ -2,9 +2,6 @@ sip:
   settings:
     bind: 172.31.11.11:5060
   profiles:
-#    foo:
-#      sip_server: 192.168.19.154:50600
-#      sink: apps/live_translator/configuration1
     bar:
       sip_server: 52.117.200.117:5060
       sink: apps/live_translator/configuration1
@@ -18,7 +15,3 @@ apps:
         stt_langs: ['en', 'pt']
         tts_langs: ['pt', 'en']
         outbound: sip/bar;cld=1929133
-#      configuration2:
-#        stt_langs: ['es', 'de']
-#        tts_langs: ['de', 'es']
-#        outbound: sip/bar;cld=+12374333
