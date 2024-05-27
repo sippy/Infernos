@@ -21,7 +21,7 @@ class RTPSessNotFoundErr(InfernSessNotFoundErr): pass
 
 @ray.remote(num_gpus=0.01, resources={"rtp": 1})
 class InfernRTPActor():
-    devices = ('cuda', 'cpu')
+    devices = ('mps', 'cuda', 'cpu')
     device: str
     sessions: Dict[UUID, InfernRTPEPoint]
     ring: InfernRTPIngest

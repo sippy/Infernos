@@ -20,7 +20,14 @@ class InfernSTTActor():
         self.sessions = {}
 
     def start(self):
-        self.stt = InfernSTTWorker('cuda')
+        for device in ('cuda', 'cpu'):
+            try:
+                self.stt = InfernSTTWorker(device)
+            except ValueError:
+                continue
+            break
+        else:
+            raise RuntimeError('Failed to initialize STT')
         self.stt.start()
 
     def stop(self):

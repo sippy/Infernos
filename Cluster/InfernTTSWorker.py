@@ -54,6 +54,8 @@ def get_torch_hw():
         return 'cuda' 
     if hasattr(torch, 'xpu') and torch.xpu.is_available():
         return 'xpu'
+    if hasattr(torch, 'mps'):
+        return 'mps'
     raise AttributeError('Could not find CUDA deivces')
 
 class InfernTTSWorker(InfernBatchedWorker):
