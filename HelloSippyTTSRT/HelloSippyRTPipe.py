@@ -249,7 +249,7 @@ class HelloSippyRTPipe:
                 endoff = min(asize, asize - (((state.idx - ends_at) * stepsize) if (ends_at:=state.ends_at[i].item()) >=0 else 0))
                 assert startoff <= endoff
                 if startoff != endoff:
-                    dispatch(audio[i][startoff:endoff].to(torch.float16).cpu())
+                    dispatch(audio[i][startoff:endoff].cpu())
                 if ends_at >= 0 and ends_at <= end_idx:
                     dispatch(None)
                     state.dispatch[i] = None
