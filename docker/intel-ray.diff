@@ -1,0 +1,17 @@
+commit 85baaa1c10a957c747f54ec0705e6b7cbfa972d1
+Author: Maksym Sobolyev <sobomax@sippysoft.com>
+Date:   Tue Mar 12 22:59:59 2024 -0700
+
+    Hack on ipex.
+
+diff --git a/python/ray/_private/workers/default_worker.py b/python/ray/_private/workers/default_worker.py
+index 4c2109831c..62115940d0 100644
+--- a/python/ray/_private/workers/default_worker.py
++++ b/python/ray/_private/workers/default_worker.py
+@@ -1,3 +1,6 @@
++try: import intel_extension_for_pytorch as ipex
++except ModuleNotFoundError: ipex = None
++
+ import os
+ import argparse
+ import base64
