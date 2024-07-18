@@ -83,7 +83,7 @@ class WeakDispatcher():
     def __init__(self, queue:Queue): self.queue = weakref.ref(queue)
     def __call__(self, res):
         q = self.queue()
-        if q: q.put(res.numpy() if res is not None else None)
+        if q: q.put(res.to(torch.float16).numpy() if res is not None else None)
 
 class InfernSession:
     _cmd_queue:Queue
