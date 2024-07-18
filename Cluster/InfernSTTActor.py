@@ -23,7 +23,7 @@ class InfernSTTActor():
         for device in ('cuda', 'cpu'):
             try:
                 self.stt = InfernSTTWorker(device)
-            except ValueError:
+            except (ValueError, RuntimeError):
                 continue
             break
         else:
