@@ -27,12 +27,21 @@ def patch_signals():
     _old_start_new_thread = threading._start_new_thread
     threading._start_new_thread = _start_new_thread
 
+def usage():
+    print('usage: Infernos.py [-f] [-L logfile] [-i pidfile] [myconfig.yaml]')
+    sys.exit(1)
+
 if __name__ == '__main__':
     try:
         opts, args = getopt(sys.argv[1:], 'fL:i:')
     except GetoptError:
-        print('usage: Infernos.py [-f] [-L logfile] [-i pidfile] config.yaml')
-        sys.exit(1)
+        usage()
+
+    if len(args) > 1:
+        usage()
+
+    cfile = 'config.yaml' if len(args) == 0 else args[0]
+
     idir = os.path.realpath(sys.argv[0])
     idir = os.path.dirname(idir)
     sys.path.append(idir)
@@ -79,12 +88,16 @@ if __name__ == '__main__':
         if str(ex).index('connecting to an existing cluster') < 0: raise ex
         ray.init()
 
-    inf_c = InfernConfig('config.yaml')
+    inf_c = InfernConfig(cfile)
 
     if pidfile != None:
         open(pidfile, 'w').write('%d' % os.getpid())
 
     inf_c.sip_conf.logger = SipLogger('Infernos',  logfile = os.path.expanduser('~/.Infernos.log'))
+
+    if inf_c.sip_actr is None:
+        ray.shutdown()
+        exit(0)
 
     try:
         exit(ray.get(inf_c.sip_actr.loop.remote(inf_c)))
