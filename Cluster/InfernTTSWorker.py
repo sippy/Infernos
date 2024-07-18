@@ -64,9 +64,11 @@ class InfernTTSWorker(InfernBatchedWorker):
     tts_engine: HelloSippyRTPipe
     output_sr: int
 
-    def __init__(self, lang, output_sr):
+    def __init__(self, lang, output_sr, device=None):
         super().__init__()
-        tts_engine = HelloSippyRTPipe(get_torch_hw(), output_sr=output_sr, **lang2model[lang])
+        if device is None:
+            device = get_torch_hw()
+        tts_engine = HelloSippyRTPipe(device, output_sr=output_sr, **lang2model[lang])
         if ipex is not None:
             self.model = ipex.optimize(tts_engine.model)
             self.vocoder = ipex.optimize(tts_engine.vocoder)
