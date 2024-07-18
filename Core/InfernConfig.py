@@ -64,7 +64,8 @@ schema = {
                         }
                     }
                 }
-            }
+            },
+            'live_translator_precache': {'type': 'boolean'},
         }
     }
 }
@@ -104,12 +105,19 @@ class InfernConfig():
             port = int(bind[1]) if len(bind) == 2 else self.sip_conf.lport
             self.sip_conf.laddr = bind[0]
             self.sip_conf.lport = port
-        self.connectors = dict((f'sip/{name}', InfernSIPProfile(name, conf))
-                               for name, conf in d['sip']['profiles'].items())
-        self.apps = dict((f'apps/live_translator/{name}', LTProfile(name, conf))
+        try:
+            self.connectors = dict((f'sip/{name}', InfernSIPProfile(name, conf))
+                                for name, conf in d['sip']['profiles'].items())
+        except KeyError:
+            self.connectors = {}
+        precache = 'live_translator_precache' in d['apps'] and d['apps']['live_translator_precache']
+        self.apps = dict((f'apps/live_translator/{name}', LTProfile(name, conf, precache))
                          for name, conf in d['apps']['live_translator']['profiles'].items())
         for app in self.apps.values():
             app.finalize(self)
-        self.sip_actr = InfernSIPActor.options(max_concurrency=2).remote()
-        for conn in self.connectors.values():
-            conn.finalize(self.sip_actr, self)
+        if 'sip' in d:
+            self.sip_actr = InfernSIPActor.options(max_concurrency=2).remote()
+            for conn in self.connectors.values():
+                conn.finalize(self.sip_actr, self)
+        else:
+            self.sip_actr = None

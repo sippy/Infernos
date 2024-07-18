@@ -50,6 +50,20 @@ class LTActor():
         ray.get(futs)
         self.sessions = {}
 
+    def precache(self, lt_prof: 'LTProfile'):
+        nltk.download('punkt')
+        lt_actr = ray.get_runtime_context().current_actor
+        tts_actrs = dict((l, InfernTTSActor.remote()) for l in lt_prof.tts_langs)
+        stt_actr = InfernSTTActor.remote()
+        futs = [_a.start.remote(**_k) for _a, _k in ((stt_actr, {}),) +
+                tuple((a, {'lang':l, 'output_sr':8000, 'device':'cpu'}) for l, a in tts_actrs.items())]
+        translators = [ntw_filter if _sol == _tl else
+                       IG.get_translator(_sol, _tl, filter=partial(ntw_filter, obj=NumbersToWords(_tl))).translate
+                       for _tl, _sol in zip(lt_prof.tts_langs, self.stt_out_langs)]
+        ray.get(futs)
+        for a in list(tts_actrs.values()) + [stt_actr]:
+            ray.get(a.stop.remote())
+
     def new_sip_session_received(self, new_sess:RemoteSessionOffer):
         if self.vds is None:
             self.vds = VADSignals()
