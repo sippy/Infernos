@@ -1,4 +1,4 @@
-sippy>=2.1.0
+git+https://github.com/sippy/b2bua.git@master
 ray
 transformers>=4.0.0
 datasets>=2.0.0
