@@ -1,13 +1,21 @@
 sip:
   settings:
-    bind: 172.31.11.11:5060
+    bind: 192.168.23.109:5060
   profiles:
+    foo:
+      sip_server: 192.168.23.190:6666
+      sink: apps/live_translator/configuration1
+      username: 'incoming'
+      password: 'user'
+      register: True
     bar:
       sip_server: 52.117.200.117:5060
-      sink: apps/live_translator/configuration1
       username: '1929132'
-      password: tj9uh22
-      register: True
+      password: 'tj9uh22'
+rtp:
+  settings:
+    min_port: 1024
+    max_port: 2048
 apps:
   live_translator:
     profiles:
