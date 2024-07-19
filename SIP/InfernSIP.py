@@ -38,7 +38,7 @@ from sippy.misc import local4remote
 
 from .InfernUAS import InfernLazyUAS
 from .InfernUAC import InfernUAC
-from .InfernUA import InfernUA, InfernSIPConf
+from .InfernUA import InfernUA
 from .InfernSIPProfile import InfernSIPProfile
 from .RemoteSession import RemoteSessionOffer, NewRemoteSessionRequest
 

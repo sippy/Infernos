@@ -8,7 +8,6 @@ from sippy.SipLogger import SipLogger
 
 sys.path.append('.')
 
-from SIP.InfernUA import InfernSIPConf
 from Cluster.InfernSIPActor import InfernSIPActor
 from Core.InfernConfig import InfernConfig
 
