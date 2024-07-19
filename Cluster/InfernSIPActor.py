@@ -17,7 +17,7 @@ class InfernSIPActor():
         #raise Exception("BP")
         from sippy.Core.EventDispatcher import ED2
         ED2.my_ident = get_ident()
-        rtp_actr = self.rtp_actr = InfernRTPActor.options(max_concurrency=2).remote()
+        rtp_actr = self.rtp_actr = InfernRTPActor.options(max_concurrency=2).remote(inf_c.rtp_conf)
         sip_actr = ray.get_runtime_context().current_actor
         ray.get(rtp_actr.start.remote())
         self.sip_stack = InfernSIP(sip_actr, rtp_actr, inf_c)

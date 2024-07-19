@@ -7,6 +7,20 @@ from Cluster.InfernSIPActor import InfernSIPActor
 from .LTActor import LTActor
 
 class LTProfile():
+    schema: dict = {
+        'profiles': {
+            'type': 'dict',
+            'keysrules': {'type': 'string'},
+            'valuesrules': {
+                'type': 'dict',
+                'schema': {
+                    'tts_langs': {'type': 'list', 'schema': {'type': 'string'}},
+                    'stt_langs': {'type': 'list', 'schema': {'type': 'string'}},
+                    'outbound': {'type': 'string'}
+                }
+            }
+        }
+    }
     name: str
     tts_langs: Tuple[str]
     stt_langs: Tuple[str]

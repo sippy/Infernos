@@ -1,110 +1,48 @@
-from typing import Dict
+from typing import Dict, Optional
 
-import yaml
-from cerberus import Validator
+from Cluster.InfernSIPActor import InfernSIPActor
+from SIP.InfernSIPConf import InfernSIPConf
+from SIP.InfernSIPProfile import InfernSIPProfile
+from RTP.InfernRTPConf import InfernRTPConf
 
-def validate_port_range(field, value, error):
-    if ':' in value:
-        _, port = value.split(':', 1)
-        if not (1 <= int(port) <= 65535):
-            error(field, 'Port number must be in the range 1-65535')
+from .ConfigValidators import validate_yaml
 
 # Define the schema
 schema = {
     'sip': {
         'type': 'dict',
         'schema': {
-            'settings': {
-                'type': 'dict',
-                'schema': {
-                    'bind': {
-                        'type': 'string',
-                        'regex': r'^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}(:[1-9][0-9]{0,4}|:0)?$',
-                        'check_with': validate_port_range
-                    },
-                }
-            },
-            'profiles': {
-                'type': 'dict',
-                'keysrules': {'type': 'string'},
-                'valuesrules': {
-                    'type': 'dict',
-                    'schema': {
-                        'sip_server': {
-                            'type': 'string',
-                            'regex': r'^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}(:[1-9][0-9]{0,4}|:0)?$',
-                            'check_with': validate_port_range
-                        },
-                        'aor': {'type': 'string'},
-                        'username': {'type': 'string'},
-                        'password': {'type': 'string'},
-                        'register': {'type': 'boolean'},
-                        'sink': {'type': 'string'},
-                    }
-                }
-            }
+            **InfernSIPConf.schema,
+            **InfernSIPProfile.schema,
+        }
+    },
+    'rtp': {
+        'type': 'dict',
+        'schema': {
+            **InfernRTPConf.schema,
         }
     },
     'apps': {
         'type': 'dict',
         'schema': {
-            'live_translator': {
-                'type': 'dict',
-                'schema': {
-                    'profiles': {
-                        'type': 'dict',
-                        'keysrules': {'type': 'string'},
-                        'valuesrules': {
-                            'type': 'dict',
-                            'schema': {
-                                'tts_langs': {'type': 'list', 'schema': {'type': 'string'}},
-                                'stt_langs': {'type': 'list', 'schema': {'type': 'string'}},
-                                'outbound': {'type': 'string'}
-                            }
-                        }
-                    }
-                }
-            },
-            'live_translator_precache': {'type': 'boolean'},
+            # Filled by modules
         }
     }
 }
 
-class InfernConfigParseErr(Exception): pass
-
-def validate_yaml(filename):
-    try:
-        with open(filename, 'r') as file:
-            data = yaml.safe_load(file)
-
-        v = Validator(schema)
-        if not v.validate(data):
-            raise InfernConfigParseErr(f"Validation errors in {filename}: {v.errors}")
-
-    except yaml.YAMLError as exc:
-        raise InfernConfigParseErr(f"Error parsing YAML file {filename}: {exc}") from exc
-    return data
-
-from Cluster.InfernSIPActor import InfernSIPActor
-from SIP.InfernUA import InfernSIPConf
-from SIP.InfernSIPProfile import InfernSIPProfile
-
 class InfernConfig():
-    sip_actr: InfernSIPActor
-    sip_conf: InfernSIPConf
+    sip_actr: Optional[InfernSIPActor]
+    sip_conf: Optional[InfernSIPConf]
+    rtp_conf: Optional[InfernRTPConf]
     connectors: Dict[str, InfernSIPProfile]
     apps: Dict[str, 'LTProfile']
     def __init__(self, filename: str):
         from Apps.LiveTranslator.LTProfile import LTProfile
-        d = validate_yaml(filename)
-        self.sip_conf = InfernSIPConf()
-        try:
-            bind = d['sip']['settings']['bind'].split(':', 1)
-        except KeyError: pass
-        else:
-            port = int(bind[1]) if len(bind) == 2 else self.sip_conf.lport
-            self.sip_conf.laddr = bind[0]
-            self.sip_conf.lport = port
+        from Apps.LiveTranslator.LTAppConfig import LTAppConfig
+        schema['apps']['schema'].update(LTAppConfig.schema)
+        d = validate_yaml(schema, filename)
+        self.sip_conf = InfernSIPConf(d['sip'].get('settings', None)) if 'sip' in d else None
+        self.rtp_conf = InfernRTPConf(d['rtp'].get('settings', None)) if 'rtp' in d else None
         try:
             self.connectors = dict((f'sip/{name}', InfernSIPProfile(name, conf))
                                 for name, conf in d['sip']['profiles'].items())

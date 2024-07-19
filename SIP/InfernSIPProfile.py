@@ -1,7 +1,30 @@
 from typing import Optional, Tuple
 from functools import partial
 
+from Core.ConfigValidators import validate_port_range
+
 class InfernSIPProfile():
+    schema: dict = {
+        'profiles': {
+            'type': 'dict',
+            'keysrules': {'type': 'string'},
+            'valuesrules': {
+                'type': 'dict',
+                'schema': {
+                    'sip_server': {
+                        'type': 'string',
+                        'regex': r'^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}(:[1-9][0-9]{0,4}|:0)?$',
+                        'check_with': validate_port_range
+                    },
+                    'aor': {'type': 'string'},
+                    'username': {'type': 'string'},
+                    'password': {'type': 'string'},
+                    'register': {'type': 'boolean'},
+                    'sink': {'type': 'string'},
+                }
+            }
+        }
+    }
     name: str
     cli: str = 'infernos_uas'
     aor: str

@@ -24,7 +24,6 @@
 # SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 from uuid import uuid4, UUID
-from functools import partial
 
 from sippy.UA import UA
 from sippy.CCEvents import CCEventFail, CCEventUpdate, CCEventConnect
@@ -51,13 +50,6 @@ body_txt = 'v=0\r\n' + \
   '\r\n'
 model_body = MsgBody(body_txt)
 model_body.parse()
-
-class InfernSIPConf(object):
-    logger = None
-
-    def __init__(self):
-        self.laddr = SipConf.my_address
-        self.lport = SipConf.my_port
 
 class InfernUASFailure(CCEventFail):
     default_code = 488

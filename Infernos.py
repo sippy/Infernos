@@ -4,7 +4,6 @@ import os, sys
 import ray
 
 from sippy.misc import daemonize
-from sippy.SipLogger import SipLogger
 
 sys.path.append('.')
 
@@ -44,8 +43,6 @@ if __name__ == '__main__':
     idir = os.path.realpath(sys.argv[0])
     idir = os.path.dirname(idir)
     sys.path.append(idir)
-    authname = None
-    authpass = None
     logfile = '/var/log/Infernos.log'
     pidfile = None
     foreground = False
@@ -54,16 +51,6 @@ if __name__ == '__main__':
             foreground = True
         elif o == '-L':
             logfile = a
-#        elif o == '-n':
-#            if a.startswith('['):
-#                parts = a.split(']', 1)
-#                iua_c.nh_addr = [parts[0] + ']', 5060]
-#                parts = parts[1].split(':', 1)
-#            else:
-#                parts = a.split(':', 1)
-#                iua_c.nh_addr = [parts[0], 5060]
-#            if len(parts) == 2:
-#                iua_c.nh_addr[1] = int(parts[1])
         elif o == '-i':
             pidfile = a
 
@@ -91,8 +78,6 @@ if __name__ == '__main__':
 
     if pidfile != None:
         open(pidfile, 'w').write('%d' % os.getpid())
-
-    inf_c.sip_conf.logger = SipLogger('Infernos',  logfile = os.path.expanduser('~/.Infernos.log'))
 
     if inf_c.sip_actr is None:
         ray.shutdown()

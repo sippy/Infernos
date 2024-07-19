@@ -7,12 +7,13 @@ from sippy.misc import local4remote
 
 from config.InfernGlobals import InfernGlobals as IG
 from Core.AudioChunk import AudioChunk
+from Core.AStreamMarkers import ASMarkerGeneric, ASMarkerNewSent
 from RTP.RTPOutputWorker import RTPOutputWorker
 from RTP.InfernRTPIngest import RTPInStream
 from RTP.AudioInput import AudioInput
 from RTP.RTPParams import RTPParams
 from RTP.InfernRTPIngest import InfernRTPIngest
-from Core.AStreamMarkers import ASMarkerGeneric, ASMarkerNewSent
+from RTP.InfernRTPConf import InfernRTPConf
 
 class InfernRTPEPoint():
     debug: bool = True
@@ -21,14 +22,14 @@ class InfernRTPEPoint():
     firstframe = True
     rtp_params:RTPParams
     state_lock: Lock
-    def __init__(self, rtp_params:RTPParams, ring:InfernRTPIngest, get_direct_soundout:callable):
+    def __init__(self, rc:InfernRTPConf, rtp_params:RTPParams, ring:InfernRTPIngest, get_direct_soundout:callable):
         self.id = uuid4()
         self.rtp_params = rtp_params
         self.state_lock = Lock()
         self.writer = RTPOutputWorker('cpu', rtp_params)
         self.rsess = RTPInStream(ring, rtp_params, get_direct_soundout)
         rtp_laddr = local4remote(rtp_params.rtp_target[0])
-        rserv_opts = Udp_server_opts((rtp_laddr, 0), self.rtp_received)
+        rserv_opts = Udp_server_opts((rtp_laddr, rc.palloc), self.rtp_received)
         rserv_opts.nworkers = 1
         rserv_opts.direct_dispatch = True
         self.rserv = Udp_server({}, rserv_opts)

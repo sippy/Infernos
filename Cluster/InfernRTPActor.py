@@ -2,20 +2,22 @@
 #except ModuleNotFoundError: ipex = None
 
 from typing import Dict, Union, Optional
-from functools import partial
 from uuid import UUID
 from _thread import get_ident
 
 from ray import ray
 
+from sippy.Network_server import RTP_port_allocator
+
 from config.InfernGlobals import InfernGlobals as IG
 from Core.AudioChunk import AudioChunk
+from Core.AStreamMarkers import ASMarkerGeneric
+from Core.Exceptions.InfernSessNotFoundErr import InfernSessNotFoundErr
 from RTP.InfernRTPIngest import InfernRTPIngest
 from RTP.InfernRTPEPoint import InfernRTPEPoint
-from Core.AStreamMarkers import ASMarkerGeneric
 from RTP.AudioInput import AudioInput
 from RTP.RTPParams import RTPParams
-from Core.Exceptions.InfernSessNotFoundErr import InfernSessNotFoundErr
+from RTP.InfernRTPConf import InfernRTPConf
 
 class RTPSessNotFoundErr(InfernSessNotFoundErr): pass
 
@@ -25,12 +27,15 @@ class InfernRTPActor():
     device: str
     sessions: Dict[UUID, InfernRTPEPoint]
     ring: InfernRTPIngest
-    def __init__(self):
+    palloc: RTP_port_allocator
+    inf_rc: InfernRTPConf
+    def __init__(self, inf_rc:InfernRTPConf):
         self.sessions = {}
+        self.inf_rc = inf_rc
 
     def new_rtp_session(self, rtp_params:RTPParams):
         print(f'{IG.stdtss()}: new_rtp_session')
-        rep = InfernRTPEPoint(rtp_params, self.ring, self._get_direct_soundout)
+        rep = InfernRTPEPoint(self.inf_rc, rtp_params, self.ring, self._get_direct_soundout)
         self.sessions[rep.id] = rep
         return (rep.id, rep.rserv.uopts.laddress)
 
