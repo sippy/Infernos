@@ -72,8 +72,8 @@ class InfernRTPActor():
             self.ring = InfernRTPIngest(device)
             try:
                 self.ring.start()
-            except AssertionError:
-                print(f'{device} did not worl')
+            except (AssertionError, RuntimeError):
+                print(f'{device} did not work')
                 continue
             self.device = device
             break
