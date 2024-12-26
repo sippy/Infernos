@@ -161,7 +161,6 @@ class LTSession():
     say_buffer: Dict[int, List[TTSRequest]]
 
     def __init__(self, lta, new_sess:RemoteSessionOffer):
-
         self.id = uuid4()
         self.say_buffer = {0:[], 1:[]}
         lt_prof: 'LTProfile' = lta.lt_prof
