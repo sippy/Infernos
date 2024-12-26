@@ -1,4 +1,5 @@
-from typing import Dict, Optional
+from typing import Dict, Optional, Union
+from functools import partial
 
 from Cluster.InfernSIPActor import InfernSIPActor
 from SIP.InfernSIPConf import InfernSIPConf
@@ -35,11 +36,14 @@ class InfernConfig():
     sip_conf: Optional[InfernSIPConf]
     rtp_conf: Optional[InfernRTPConf]
     connectors: Dict[str, InfernSIPProfile]
-    apps: Dict[str, 'LTProfile']
+    apps: Dict[str, Union['LTProfile', 'AIAProfile']]
     def __init__(self, filename: str):
         from Apps.LiveTranslator.LTProfile import LTProfile
         from Apps.LiveTranslator.LTAppConfig import LTAppConfig
         schema['apps']['schema'].update(LTAppConfig.schema)
+        from Apps.AIAttendant.AIAProfile import AIAProfile
+        from Apps.AIAttendant.AIAAppConfig import AIAAppConfig
+        schema['apps']['schema'].update(AIAAppConfig.schema)
         d = validate_yaml(schema, filename)
         self.sip_conf = InfernSIPConf(d['sip'].get('settings', None)) if 'sip' in d else None
         self.rtp_conf = InfernRTPConf(d['rtp'].get('settings', None)) if 'rtp' in d else None
@@ -49,8 +53,13 @@ class InfernConfig():
         except KeyError:
             self.connectors = {}
         precache = 'live_translator_precache' in d['apps'] and d['apps']['live_translator_precache']
-        self.apps = dict((f'apps/live_translator/{name}', LTProfile(name, conf, precache))
-                         for name, conf in d['apps']['live_translator']['profiles'].items())
+        _LTProfile = partial(LTProfile, precache=precache)
+        self.apps = {}
+        for aname, AProf in (('live_translator', _LTProfile), ('ai_attendant', AIAProfile)):
+            if aname not in d['apps']: continue
+            app_confs = dict((f'apps/{aname}/{name}', AProf(name, conf))
+                        for name, conf in d['apps'][aname]['profiles'].items())
+            self.apps.update(app_confs)
         for app in self.apps.values():
             app.finalize(self)
         if 'sip' in d:
