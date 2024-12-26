@@ -1,5 +1,5 @@
-try: import intel_extension_for_pytorch as ipex
-except ModuleNotFoundError: ipex = None
+#try: import intel_extension_for_pytorch as ipex
+#except ModuleNotFoundError: ipex = None
 
 import weakref, uuid
 from typing import List, Optional

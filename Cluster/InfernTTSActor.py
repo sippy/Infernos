@@ -1,5 +1,5 @@
-try: import intel_extension_for_pytorch as ipex
-except ModuleNotFoundError: ipex = None
+#try: import intel_extension_for_pytorch as ipex
+#except ModuleNotFoundError: ipex = None
 
 from typing import Dict, Optional
 from uuid import UUID

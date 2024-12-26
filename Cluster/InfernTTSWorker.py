@@ -1,8 +1,3 @@
-try:
-    import intel_extension_for_pytorch as ipex
-except ModuleNotFoundError:
-    ipex = None
-
 from typing import List
 
 import torch
@@ -65,6 +60,13 @@ class InfernTTSWorker(InfernBatchedWorker):
     output_sr: int
 
     def __init__(self, lang, output_sr, device=None):
+        from warnings import filterwarnings
+        filterwarnings("ignore", category=FutureWarning)
+        filterwarnings("ignore", category=UserWarning)
+        try:
+            import intel_extension_for_pytorch as ipex
+        except ModuleNotFoundError:
+            ipex = None
         super().__init__()
         if device is None:
             device = get_torch_hw()
