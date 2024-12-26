@@ -36,6 +36,8 @@ class InfernBatchedWorker(InfernWrkThread, ABC):
             wis = self.next_batch()
             if wis is None:
                 break
+            for wi in (wi for wi in wis if hasattr(wi, '_proc_start_cb')):
+                wi._proc_start_cb()
             self.process_batch(wis)
 
     def stop(self):
