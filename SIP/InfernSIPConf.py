@@ -22,6 +22,7 @@ class InfernSIPConf():
     logger = None
 
     def __init__(self, conf:Optional[dict]=None):
+        self.logger = SipLogger('Infernos',  logfile = expanduser('~/.Infernos.log'))
         if conf is not None:
             try:
                 bind = conf['bind'].split(':', 1)
@@ -33,4 +34,3 @@ class InfernSIPConf():
                 return
         self.laddr = SipConf.my_address
         self.lport = SipConf.my_port
-        self.logger = SipLogger('Infernos',  logfile = expanduser('~/.Infernos.log'))
