@@ -1,0 +1,20 @@
+sip:
+  settings:
+    bind: 192.168.24.29:5060
+  profiles:
+    foo:
+      sip_server: 192.168.23.109:5070
+      sink: apps/ai_attendant/configuration1
+      username: 'incoming'
+      password: 'user'
+      register: False
+rtp:
+  settings:
+    min_port: 1024
+    max_port: 2048
+apps:
+  ai_attendant:
+    profiles:
+      configuration1:
+        stt_lang: 'en'
+        tts_lang: 'en'
