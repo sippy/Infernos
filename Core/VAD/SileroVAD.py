@@ -41,8 +41,8 @@ class SileroVADWorker(InfernBatchedWorker):
     max_vad_frames: int
     def __init__(self, device, input_sr: int = 8000):
         super().__init__()
-        model, utils = torch.hub.load(repo_or_dir='snakers4/silero-vad',
-                                    model='silero_vad', force_reload=True)
+        model, utils = torch.hub.load(repo_or_dir='snakers4/silero-vad:v3.1',
+                                    model='silero_vad', force_reload=True, trust_repo=True)
         self.device = device
         self.model = model = model.eval().to(device)
         #for n, t in [(_t, getattr(_m, _t, None))

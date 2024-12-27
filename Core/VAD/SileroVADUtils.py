@@ -100,7 +100,7 @@ class VADIteratorB:
 
         window_size_samples = len(x[0]) if x.dim() == 2 else len(x)
 
-        speech_probs = (y[0] for y in self.model(x, self.sampling_rate).tolist())
+        speech_probs = (y for y in self.model(x, self.sampling_rate).tolist())
 
         for speech_prob, channel in zip(speech_probs, bstate.channels):
             channel.current_sample += window_size_samples
