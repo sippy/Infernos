@@ -5,8 +5,6 @@ from functools import partial
 from threading import Lock
 from time import monotonic
 
-import torch
-
 from Core.AudioChunk import AudioChunk
 
 class STTRequest():
@@ -15,7 +13,8 @@ class STTRequest():
     text_cb: callable
     mode: str = 'transcribe'
     timestamps: bool = False
-    stime:float
+    stime: float
+    max_ns_prob: float = 0.5
     def __init__(self, chunk:AudioChunk, text_cb:callable, lang:str):
         self.stime = monotonic()
         self.lang, self.chunk, self.text_cb = lang, chunk, text_cb
