@@ -1,15 +1,18 @@
-from typing import Optional
+from typing import Optional, Tuple
 from functools import partial
 from uuid import UUID
 
+from SIP.SipSessInfo import SipSessInfo
 from .InfernSIPProfile import InfernSIPProfile
 
 class RemoteSessionOffer():
     sip_sess_id: UUID
+    sess_info: SipSessInfo
     accept: callable
     reject: callable
     def __init__(self, sip_stack:'InfernSIP', ua:'InfernLazyUAS'):
         self.sip_sess_id = ua.id
+        self.sess_info = ua.get_session_info()
         self.accept = partial(sip_stack.sip_actr.new_sess_accept.remote, sip_sess_id=ua.id)
         self.reject = partial(sip_stack.sip_actr.new_sess_reject.remote, sip_sess_id=ua.id)
 

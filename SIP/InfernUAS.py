@@ -34,6 +34,7 @@ from Cluster.RemoteRTPGen import RemoteRTPGen, RTPGenError
 from SIP.InfernUA import InfernUA, model_body, InfernUASFailure
 from SIP.RemoteSession import RemoteSessionAccept
 from SIP.InfernSIPProfile import InfernSIPProfile
+from SIP.SipSessInfo import SipSessInfo
 from Core.Codecs.G711 import G711Codec
 from Core.Codecs.G722 import G722Codec
 
@@ -117,3 +118,10 @@ class InfernLazyUAS(InfernUAS):
 
     def cancelled(self, *args):
         del self._sip_stack, self._req, self._sip_t, self._id
+
+    def get_session_info(self) -> SipSessInfo:
+        call_id = str(self._req.getHFBody('call-id'))
+        from_hf = self._req.getHFBody('from')
+        from_name = from_hf.getUri().name
+        from_number = from_hf.getUrl().username
+        return SipSessInfo(call_id, from_number, from_name)
