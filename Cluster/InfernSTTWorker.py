@@ -57,7 +57,7 @@ class InfernSTTWorker(InfernBatchedWorker):
         self.device = device
         self.infer_and_decode = partial(self.infer_and_decode_ct2 if device != 'xpu' else self.infer_and_decode_torch)
 
-    def infer_and_decode_ct2(self, prompts, inputs):
+    def infer_and_decode_ct2(self, prompts, inputs, max_nsps):
         input_features = inputs.input_features
         features = ctranslate2.StorageView.from_array(input_features)
         try:
@@ -73,7 +73,7 @@ class InfernSTTWorker(InfernBatchedWorker):
                             for r in results)
         return decoded_results
 
-    def infer_and_decode_torch(self, prompts, inputs):
+    def infer_and_decode_torch(self, prompts, inputs, max_nsps):
         inputs = {k: v.to(self.device) for k, v in inputs.items()}
         max_len = max(len(t) for t in prompts)
         prompts = torch.stack([
@@ -87,6 +87,9 @@ class InfernSTTWorker(InfernBatchedWorker):
             )
             logprobs = forward_outputs.logits[:, 0].log_softmax(-1)
             no_speech_probs = logprobs[:, self.no_speech_token_id].exp().tolist()
+        if all(nsp > max_nsp for nsp, max_nsp in zip(no_speech_probs, max_nsps)):
+            return (('', nsp, []) for nsp in no_speech_probs)
+        with torch.no_grad():
             gen_outputs = self.model.generate(
                 **inputs,
                 decoder_input_ids=prompts,
@@ -104,10 +107,12 @@ class InfernSTTWorker(InfernBatchedWorker):
     def process_batch(self, wis:List[Tuple[STTRequest, List[int]]]):
         if self.debug:
             print(f'InfernSTTWorker.process_batch: got {len(wis)=}')
+        assert all(wi[0].chunk.samplerate == self.sample_rate for wi in wis)
         audios = [wi[0].chunk.audio for wi in wis]
         inputs = self.process_audios(audios, sampling_rate=self.sample_rate)
         prompts = self.get_prompt(tuple((wi[0].lang, wi[0].mode, wi[0].timestamps) for wi in wis))
-        good_results = self.infer_and_decode(prompts, inputs)
+        max_nsps = [wi[0].max_ns_prob for wi in wis]
+        good_results = self.infer_and_decode(prompts, inputs, max_nsps)
         for (wi, c), (r, nsp, t) in zip(wis, good_results):
             # Remove leading and trailing space: "WhitespaceTokenizer adds a space at the beginning?" (copilot)
             if len(r) > 0 and r[0] == ' ': r = r[1:]

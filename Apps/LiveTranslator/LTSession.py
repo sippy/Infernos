@@ -205,7 +205,7 @@ class LTSession():
         sdir = 'A->B' if result.direction == 0 else 'B->A'
         print(f'STT: {sdir} "{result.text=}" {result.no_speech_prob=}')
         nsp = result.no_speech_prob
-        if nsp > 0.5: return
+        if nsp > STTRequest.max_ns_prob: return
         sinfo = self.fabric.info[result.direction]
         text = sinfo.translator(result.text)
         speaker_id = sinfo.get_speaker()
