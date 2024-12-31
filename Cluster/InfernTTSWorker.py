@@ -101,4 +101,6 @@ class InfernTTSWorker(InfernBatchedWorker):
     def get_rand_voice(self):
         return self.tts_engine.get_rand_voice()
 
+    def get_rand_voice_id(self):
+        return self.tts_engine.get_rand_voice_id()
 

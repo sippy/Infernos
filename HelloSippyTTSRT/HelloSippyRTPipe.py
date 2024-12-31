@@ -258,8 +258,11 @@ class HelloSippyRTPipe:
                 return False
         return True
 
+    def get_rand_voice_id(self):
+        return torch.randint(0, len(self.speaker_embeddings), (1,)).item()
+
     def get_rand_voice(self):
-        s_index = torch.randint(0, len(self.speaker_embeddings), (1,)).item()
+        s_index = self.get_rand_voice_id()
         rv = self.speaker_embeddings[s_index]
         return (rv, s_index)
 

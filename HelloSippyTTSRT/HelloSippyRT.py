@@ -270,9 +270,12 @@ class HelloSippyRT():
             self.speaker_embeddings = [torch.tensor(ed["xvector"]).unsqueeze(0)
                                         for ed in embeddings_dataset]
 
+    def get_rand_voice_id(self):
+        return torch.randint(0, len(self.speaker_embeddings), (1,)).item()
+
     def get_rand_voice(self):
         with self.cuda_lock:
-            s_index = torch.randint(0, len(self.speaker_embeddings), (1,)).item()
+            s_index = self.get_rand_voice_id()
             rv = self.speaker_embeddings[s_index].to(self.model.device)
             return rv
 

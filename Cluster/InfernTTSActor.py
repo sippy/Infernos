@@ -25,6 +25,9 @@ class InfernTTSActor():
     def stop(self):
         self.tts.stop()
 
+    def get_rand_voice_id(self) -> int:
+        return self.tts.get_rand_voice_id()
+
     def new_tts_session(self):
         tts_actr = ray.get_runtime_context().current_actor
         rgen = TTSSession(self.tts, tts_actr)
