@@ -1,7 +1,7 @@
 #try: import intel_extension_for_pytorch as ipex
 #except ModuleNotFoundError: ipex = None
 
-from typing import Dict, Union, Optional
+from typing import Dict, Union, List
 from uuid import UUID
 from _thread import get_ident
 
@@ -26,11 +26,13 @@ class InfernRTPActor():
     devices = ('mps', 'cuda', 'cpu')
     device: str
     sessions: Dict[UUID, InfernRTPEPoint]
+    thumbstones: List[UUID]
     ring: InfernRTPIngest
     palloc: RTP_port_allocator
     inf_rc: InfernRTPConf
     def __init__(self, inf_rc:InfernRTPConf):
         self.sessions = {}
+        self.thumbstones = []
         self.inf_rc = inf_rc
 
     def new_rtp_session(self, rtp_params:RTPParams):
@@ -49,12 +51,17 @@ class InfernRTPActor():
         try:
             rep = self._get_session(rtp_id)
         except RTPSessNotFoundErr:
-            if relaxed: return
+            if relaxed or rtp_id in self.thumbstones: return
             raise
         rep.writer.end()
 
     def rtp_session_soundout(self, rtp_id, chunk:Union[AudioChunk, ASMarkerGeneric]):
-        rep = self._get_session(rtp_id)
+        try:
+            rep = self._get_session(rtp_id)
+        except RTPSessNotFoundErr:
+            if rtp_id in self.thumbstones:
+                return
+            raise
         return rep.soundout(chunk)
 
     def _get_direct_soundout(self, rtp_id):
@@ -66,6 +73,9 @@ class InfernRTPActor():
         rep = self._get_session(rtp_id)
         rep.shutdown()
         del self.sessions[rtp_id]
+        self.thumbstones.append(rtp_id)
+        if len(self.thumbstones) > 100:
+            self.thumbstones = self.thumbstones[-100:]
 
     def rtp_session_update(self, rtp_id, rtp_params:RTPParams):
         print(f'{IG.stdtss()}: rtp_session_update')
