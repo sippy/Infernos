@@ -16,7 +16,7 @@ from RTP.InfernRTPIngest import InfernRTPIngest
 from RTP.InfernRTPConf import InfernRTPConf
 
 class InfernRTPEPoint():
-    debug: bool = True
+    debug: bool = False
     id: UUID
     dl_file = None
     firstframe = True
