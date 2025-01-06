@@ -12,9 +12,10 @@ blazing-fast future, free from lag.
 
 ## News
 
-Work is underway to scale TTS performance 50x. Stay tuned.
+Initial integration of the LLM (Qwen 2.5) and addition of the A.I.
+Attendant application.
 
-I am going to present at FOSDEM 2024 (RTC track). See you all there!
+Upcoming presentation at the OpenSIPS Summit 2025.
 
 ## Features
 
