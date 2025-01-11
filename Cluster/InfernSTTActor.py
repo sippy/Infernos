@@ -1,13 +1,13 @@
 #try: import intel_extension_for_pytorch as ipex
 #except ModuleNotFoundError: ipex = None
 
-from typing import Dict
+from typing import Dict, Union
 from uuid import UUID
 
 import ray
 
 from Cluster.InfernSTTWorker import InfernSTTWorker
-from Cluster.STTSession import STTSession, STTRequest
+from Cluster.STTSession import STTSession, STTRequest, STTSentinel
 
 @ray.remote(num_gpus=0.25, resources={"stt": 1})
 class InfernSTTActor():
@@ -47,7 +47,7 @@ class InfernSTTActor():
         sess.stop()
         del self.sessions[sess_id]
 
-    def stt_session_soundin(self, sess_id, req:STTRequest):
+    def stt_session_soundin(self, sess_id, req:Union[STTRequest,STTSentinel]):
         if self.debug: print('InfernSTTActor.stt_session_soundin')
         sess = self.sessions[sess_id]
         sess.soundin(req)

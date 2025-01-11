@@ -1,4 +1,4 @@
-from typing import Tuple, List, Optional, Dict
+from typing import Tuple, List, Optional, Dict, Union
 from uuid import UUID, uuid4
 from functools import partial
 import ray
@@ -6,7 +6,7 @@ import ray
 from nltk.tokenize import sent_tokenize
 
 from Cluster.TTSSession import TTSRequest
-from Cluster.STTSession import STTRequest, STTResult
+from Cluster.STTSession import STTRequest, STTResult, STTSentinel
 from Cluster.LLMSession import LLMRequest, LLMResult
 from Cluster.RemoteTTSSession import RemoteTTSSession
 from Cluster.InfernRTPActor import InfernRTPActor
@@ -17,7 +17,9 @@ from Core.T2T.Translator import Translator
 from Core.AudioChunk import AudioChunk
 from ..LiveTranslator.LTSession import _sess_term, TTSProxy
 
-class STTProxy():
+class STTProxy(AudioInput):
+    from time import monotonic
+    last_chunk_time: Optional[float] = None
     debug = True
     stt_do: callable
     stt_done: callable
@@ -25,8 +27,24 @@ class STTProxy():
         self.stt_do = partial(stt_actr.stt_session_soundin.remote, sess_id=stt_sess_id)
         self.lang, self.stt_done = stt_lang, stt_done
 
+    def audio_in(self, chunk:AudioChunk):
+        if self.last_chunk_time is None:
+            return
+        if chunk.active:
+            self.last_chunk_time = None
+            return
+        if self.monotonic() - self.last_chunk_time < 2.0:
+            return
+        def stt_done(result:STTSentinel):
+            print(f'STTProxy: {result=}')
+            self.stt_done(result=result)
+        self.last_chunk_time = None
+        sreq = STTSentinel('flush', stt_done)
+        self.stt_do(req=sreq)
+
     # This method runs in the context of the inbound RTP Actor
-    def __call__(self, chunk:AudioChunk):
+    def vad_chunk_in(self, chunk:AudioChunk):
+        self.last_chunk_time = self.monotonic()
         if self.debug:
             print(f'STTProxy: VAD: {len(chunk.audio)=} {chunk.track_id=}')
         def stt_done(result:STTResult):
@@ -48,6 +66,7 @@ class AIASession():
     say_buffer: List[TTSRequest]
     translator: Optional[Translator]
     stt_sess_term: callable
+    text_in_buffer: List[str]
 
     def __init__(self, aiaa:'AIAActor', new_sess:RemoteSessionOffer):
         self.id = uuid4()
@@ -70,7 +89,7 @@ class AIASession():
         self.translator = aiaa.translator
         text_cb = partial(aiaa.aia_actr.text_in.remote, sess_id=self.id)
         vad_handler = STTProxy(aiaa.stt_actr, aiaa.stt_lang, self.stt_sess_id, text_cb)
-        self.rtp_actr.rtp_session_connect.remote(self.rtp_sess_id, AudioInput(None, vad_handler))
+        self.rtp_actr.rtp_session_connect.remote(self.rtp_sess_id, vad_handler)
         soundout = partial(self.rtp_actr.rtp_session_soundout.remote, self.rtp_sess_id)
         tts_soundout = TTSProxy(soundout)
         self.tts_sess.start(tts_soundout)
@@ -81,7 +100,9 @@ class AIASession():
                                                sess_id=self.llm_sess_id)
         si = new_sess.sess_info
         self.n2w = NumbersToWords()
+        self.text_in_buffer = []
         self.text_to_llm(f'<Incoming call from "{si.from_name}" at "{si.from_number}">')
+        print(f'Agent {self.speaker} at your service.')
 
     def text_to_llm(self, text:str):
         req = LLMRequest(text, self.llm_text_cb)
@@ -89,23 +110,31 @@ class AIASession():
         self.llm_session_textin(req=req)
         self.last_llm_req_id = req.id
 
-    def text_in(self, result:STTResult):
-        print(f'STT: "{result.text=}" {result.no_speech_prob=}')
-        nsp = result.no_speech_prob
-        if nsp > STTRequest.max_ns_prob or len(result.text) == 0:
-            if result.duration < 5.0:
-                return
-            text = f'<unintelligible duration={result.duration} no_speech_probability={nsp}>'
-        else:
-            text = result.text
-        if len(self.say_buffer) > 1:
-            self.say_buffer = self.say_buffer[:1]
-            self.llm_session_context_add(content='<sentence interrupted>', role='user')
+    def text_in(self, result:Union[STTResult,STTSentinel]):
+        if isinstance(result, STTResult):
+            if self.debug:
+                print(f'STT: "{result.text=}" {result.no_speech_prob=}')
+            nsp = result.no_speech_prob
+            if nsp > STTRequest.max_ns_prob or len(result.text) == 0:
+                if result.duration < 5.0:
+                    return
+                text = f'<unaudible duration={result.duration} no_speech_probability={nsp}>'
+            else:
+                text = result.text
+            self.text_in_buffer.append(text)
+            if len(self.say_buffer) > 1:
+                self.say_buffer = self.say_buffer[:1]
+                self.llm_session_context_add(content='<sentence interrupted>', role='user')
+            return
+        if len(self.text_in_buffer) == 0:
+            return
+        text = ' '.join(self.text_in_buffer)
+        self.text_in_buffer = []
         self.text_to_llm(text)
         return
 
     def text_out(self, result:LLMResult):
-        print(f'text_out({result.text=})')
+        if self.debug: print(f'text_out({result.text=})')
         if result.req_id != self.last_llm_req_id:
             print(f'LLMResult for old req_id: {result.req_id}')
             return
@@ -120,11 +149,11 @@ class AIASession():
             self.tts_say(t)
 
     def _tts_say(self, tr:TTSRequest):
-            self.tts_sess.say(tr)
-            self.llm_session_context_add(content=tr.text[0], role='assistant')
+        self.tts_sess.say(tr)
+        self.llm_session_context_add(content=tr.text[0], role='assistant')
 
     def tts_say(self, text):
-        print(f'tts_say({text=})')
+        if self.debug: print(f'tts_say({text=})')
         text = self.n2w(text)
         tts_req = TTSRequest([text,], done_cb=self.tts_say_done_cb, speaker_id=self.speaker)
         self.say_buffer.append(tts_req)

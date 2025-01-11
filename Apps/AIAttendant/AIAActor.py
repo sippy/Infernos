@@ -1,4 +1,4 @@
-from typing import Dict, Optional, List
+from typing import Dict, Optional, List, Union
 from uuid import UUID
 from functools import partial
 
@@ -11,7 +11,7 @@ from Cluster.InfernSIPActor import InfernSIPActor
 from Cluster.InfernTTSActor import InfernTTSActor
 from Cluster.InfernSTTActor import InfernSTTActor
 from Cluster.InfernLLMActor import InfernLLMActor
-from Cluster.STTSession import STTResult
+from Cluster.STTSession import STTResult, STTSentinel
 from Cluster.LLMSession import LLMResult
 from SIP.RemoteSession import RemoteSessionOffer
 from Core.T2T.NumbersToWords import NumbersToWords
@@ -74,9 +74,10 @@ class AIAActor():
         if len(self.thumbstones) > 100:
             self.thumbstones = self.thumbstones[-100:]
 
-    def text_in(self, sess_id:UUID, result:STTResult):
-        self.swriter.add_scalar(f'stt/inf_time', result.inf_time, self.nstts)
-        self.nstts += 1
+    def text_in(self, sess_id:UUID, result:Union[STTResult,STTSentinel]):
+        if isinstance(result, STTResult):
+            self.swriter.add_scalar(f'stt/inf_time', result.inf_time, self.nstts)
+            self.nstts += 1
         self._get_session(sess_id).text_in(result)
 
     def text_out(self, sess_id:UUID, result:LLMResult):

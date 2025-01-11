@@ -1,4 +1,4 @@
-from typing import List, Optional
+from typing import List, Optional, Union
 from uuid import uuid4, UUID
 from fractions import Fraction
 from functools import partial
@@ -18,6 +18,13 @@ class STTRequest():
     def __init__(self, chunk:AudioChunk, text_cb:callable, lang:str):
         self.stime = monotonic()
         self.lang, self.chunk, self.text_cb = lang, chunk, text_cb
+
+class STTSentinel():
+    stime: float
+    text_cb: callable
+    def __init__(self, signal:str, text_cb:callable):
+        self.stime = monotonic()
+        self.signal, self.text_cb = signal, text_cb
 
 class STTResult():
     text: str
@@ -53,29 +60,44 @@ class STTSession():
         with self.state_lock:
             del self.stt, self.pending
 
-    def soundin(self, req:STTRequest):
-        if self.debug: print(f'STTSession.soundin({len(req.chunk.audio)=})')
-        if req.chunk.samplerate != self.stt.sample_rate:
-            req.chunk.resample(self.stt.sample_rate)
-        req.chunk.audio = req.chunk.audio.numpy()
+    def soundin(self, req:Union[STTRequest,STTSentinel]):
+        if self.debug:
+            if isinstance(req, STTRequest):
+                print(f'STTSession.soundin({len(req.chunk.audio)=})')
+            else:
+                print(f'STTSession.soundin({req=})')
+        if isinstance(req, STTRequest):
+            if req.chunk.samplerate != self.stt.sample_rate:
+                req.chunk.resample(self.stt.sample_rate)
+            req.chunk.audio = req.chunk.audio.numpy()
         with self.state_lock:
             if self.busy:
                 self.pending.append(req)
                 return
-            self.busy = True
+            if isinstance(req, STTRequest):
+                self.busy = True
+            else:
+                req.text_cb(result=req)
+                return
         req.text_cb = partial(self.tts_out, req.text_cb)
         self.stt.infer((req, self.context))
 
     def tts_out(self, text_cb, result:STTResult):
+        results = [(text_cb, result)]
         with self.state_lock:
             if not hasattr(self, 'stt'):
                 return
             if self.debug: print(f'STTSession.tts_out({result.text=})')
             assert self.busy
-            if self.pending:
+            while self.pending:
                 req = self.pending.pop(0)
-                req.text_cb = partial(self.tts_out, req.text_cb)
-                self.stt.infer((req, self.context))
+                if isinstance(req, STTRequest):
+                    req.text_cb = partial(self.tts_out, req.text_cb)
+                    self.stt.infer((req, self.context))
+                    break
+                if all(isinstance(r, STTRequest) for r in self.pending):
+                    results.append((req.text_cb, req))
             else:
                 self.busy = False
-        text_cb(result=result)
+        for cb, r in results:
+            cb(result=r)
