@@ -100,6 +100,7 @@ class RTPInStream():
             dprint(f"{res=}")
 
     def audio_chunk_out(self, chunk:AudioChunk, active:bool):
+        chunk.active = active
         with self.ain_lock:
             if self.ain.audio_in is None: return
             self.ain.audio_in(chunk=chunk)
