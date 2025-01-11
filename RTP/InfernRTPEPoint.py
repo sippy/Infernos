@@ -81,7 +81,8 @@ class InfernRTPEPoint():
     def soundout(self, chunk:Union[AudioChunk, ASMarkerGeneric]):
         ismark = isinstance(chunk, ASMarkerGeneric)
         if self.firstframe or ismark:
-            print(f'{IG.stdtss()}: rtp_session_soundout[{str(self.id)[:6]}]: {"mark" if ismark else chunk.audio.size(0)}')
+            if self.debug:
+                print(f'{IG.stdtss()}: rtp_session_soundout[{str(self.id)[:6]}]: {"mark" if ismark else chunk.audio.size(0)}')
             self.firstframe = False
         if ismark and isinstance(chunk, ASMarkerNewSent):
             self.firstframe = True

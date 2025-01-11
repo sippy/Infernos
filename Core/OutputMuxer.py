@@ -8,6 +8,7 @@ from .AudioChunk import AudioChunk
 from .AStreamMarkers import ASMarkerGeneric, ASMarkerNewSent
 
 class OutputMuxer():
+    debug = False
     output_sr:int
     qsize:int
     device:str
@@ -37,7 +38,8 @@ class OutputMuxer():
                 #self.update_frm_ctrs(prcsd_inc=pos.get_buf_nframes())
                 if chunk_o.size(0) > 0:
                     return chunk_o
-                print(f'{monotonic():4.3f}: ASMarkerNewSent {chunk.on_proc=}')
+                if self.debug:
+                    print(f'{monotonic():4.3f}: ASMarkerNewSent {chunk.on_proc=}')
                 self.chunks_in.pop(0)
                 chunk.on_proc(rtp_worker)
                 continue

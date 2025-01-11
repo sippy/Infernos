@@ -15,13 +15,15 @@ class ASMarkerNewSent(ASMarkerGeneric):
     def on_proc(self, tro_self, *args): pass
 
 class ASMarkerSentDoneCB(ASMarkerNewSent):
+    debug = False
     def __init__(self, done_cb:callable, sync:bool=False, **kwargs):
         super().__init__(**kwargs)
         self.done_cb = done_cb
         self.sync = sync
 
     def on_proc(self, tro_self):
-        print(f'{monotonic():4.3f}: ASMarkerSentDoneCB.on_proc')
+        if self.debug:
+            print(f'{monotonic():4.3f}: ASMarkerSentDoneCB.on_proc')
         x = self.done_cb()
         if self.sync:
             try: ray.get(x)
