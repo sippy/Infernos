@@ -19,7 +19,6 @@ from Core.Exceptions.InfernSessNotFoundErr import InfernSessNotFoundErr
 
 from .AIASession import AIASession
 from ..LiveTranslator.LTActor import ntw_filter
-from ..LiveTranslator.LTSession import VADSignals
 
 class AIASessNotFoundErr(InfernSessNotFoundErr): pass
 
@@ -27,7 +26,6 @@ class AIASessNotFoundErr(InfernSessNotFoundErr): pass
 class AIAActor():
     sessions: Dict[UUID, AIASession]
     thunmbstones: List[UUID]
-    vds: Optional[VADSignals]=None
     translator: callable
     nstts: int = 0
     def __init__(self):
@@ -57,8 +55,6 @@ class AIAActor():
         self.thumbstones = []
 
     def new_sip_session_received(self, new_sess:RemoteSessionOffer):
-        if self.vds is None:
-            self.vds = VADSignals()
         aia_sess = AIASession(self, new_sess)
         print(f'{aia_sess=}')
         self.sessions[aia_sess.id] = aia_sess
