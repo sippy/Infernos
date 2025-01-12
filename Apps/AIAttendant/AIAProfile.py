@@ -16,18 +16,21 @@ class AIAProfile():
                 'schema': {
                     'tts_lang': {'type': 'string'},
                     'stt_lang': {'type': 'string'},
+                    'llm_prompt': {'type': 'string'},
                 }
             }
         }
     }
     stt_lang: str = 'en'
     tts_lang: str = 'en'
+    llm_prompt: str
     actor: Optional[AIAActor] = None
 
     def __init__(self, name, conf):
         self.name = name
         self.tts_lang = conf['tts_lang']
         self.stt_lang = conf['stt_lang']
+        self.llm_prompt = open(conf['llm_prompt']).read()
 
     def finalize(self, iconf:'InfernConfig'):
         pass

@@ -7,7 +7,7 @@ from nltk.tokenize import sent_tokenize
 
 from Cluster.TTSSession import TTSRequest
 from Cluster.STTSession import STTRequest, STTResult, STTSentinel
-from Cluster.LLMSession import LLMRequest, LLMResult
+from Cluster.LLMSession import LLMRequest, LLMResult, LLMSessionParams
 from Cluster.RemoteTTSSession import RemoteTTSSession
 from Cluster.InfernRTPActor import InfernRTPActor
 from Core.T2T.NumbersToWords import NumbersToWords
@@ -68,7 +68,7 @@ class AIASession():
     stt_sess_term: callable
     text_in_buffer: List[str]
 
-    def __init__(self, aiaa:'AIAActor', new_sess:RemoteSessionOffer):
+    def __init__(self, aiaa:'AIAActor', new_sess:RemoteSessionOffer, llm_prompt:str):
         self.id = uuid4()
         self.say_buffer = []
         sess_term_alice = partial(_sess_term, sterm=aiaa.aia_actr.sess_term.remote, sess_id=self.id, sip_sess_id=new_sess.sip_sess_id)
@@ -81,7 +81,8 @@ class AIASession():
             return
         self.rtp_actr, self.rtp_sess_id = rtp_alice
         stt_sess = aiaa.stt_actr.new_stt_session.remote(keep_context=True)
-        llm_sess = aiaa.llm_actr.new_llm_session.remote()
+        llmp = LLMSessionParams(llm_prompt)
+        llm_sess = aiaa.llm_actr.new_llm_session.remote(llmp)
         self.tts_sess = RemoteTTSSession(aiaa.tts_actr)
         self.stt_sess_id, self.llm_sess_id = ray.get([stt_sess, llm_sess])
         self.stt_sess_term = partial(aiaa.stt_actr.stt_session_end.remote, self.stt_sess_id)

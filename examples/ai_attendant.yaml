@@ -3,7 +3,7 @@ sip:
     bind: 192.168.24.29:5060
   profiles:
     foo:
-      sip_server: 192.168.23.109:5070
+      sip_server: 192.168.24.1:5070
       sink: apps/ai_attendant/configuration1
       username: 'incoming'
       password: 'user'
@@ -18,3 +18,4 @@ apps:
       configuration1:
         stt_lang: 'en'
         tts_lang: 'en'
+        llm_prompt: 'examples/sippylabs.txt'

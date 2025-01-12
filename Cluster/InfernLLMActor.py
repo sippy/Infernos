@@ -5,7 +5,7 @@ from queue import Queue
 import ray
 
 from Cluster.InfernLLMWorker import InfernLLMWorker
-from Cluster.LLMSession import LLMSession, LLMRequest, LLMInferRequest
+from Cluster.LLMSession import LLMSession, LLMRequest, LLMInferRequest, LLMSessionParams
 
 @ray.remote(num_gpus=1.0, resources={"llm": 1})
 class InfernLLMActor():
@@ -42,9 +42,9 @@ class InfernLLMActor():
     def stop(self):
         self.llm.stop()
 
-    def new_llm_session(self):
+    def new_llm_session(self, sconf:LLMSessionParams):
         if self.debug: print('InfernLLMActor.new_llm_session')
-        sess = LLMSession(self.llm)
+        sess = LLMSession(self.llm, sconf)
         self.sessions[sess.id] = sess
         return sess.id
 

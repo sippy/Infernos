@@ -55,7 +55,7 @@ class AIAActor():
         self.thumbstones = []
 
     def new_sip_session_received(self, new_sess:RemoteSessionOffer):
-        aia_sess = AIASession(self, new_sess)
+        aia_sess = AIASession(self, new_sess, self.aia_prof.llm_prompt)
         print(f'{aia_sess=}')
         self.sessions[aia_sess.id] = aia_sess
 

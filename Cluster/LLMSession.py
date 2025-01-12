@@ -26,17 +26,18 @@ class LLMInferRequest():
     def __init__(self, req:LLMRequest, context:List[dict]):
         self.req, self.context = req, tuple(context)
 
+class LLMSessionParams():
+    system_prompt: str
+    def __init__(self, system_prompt:str):
+        self.system_prompt = system_prompt
+
 class LLMSession():
     id: UUID
     context: List[dict]
     debug: bool = False
-    def __init__(self, llm):
+    def __init__(self, llm:'InfernLLMWorker', params:LLMSessionParams):
         self.id = uuid4()
-        self.context = [{"role": "system", "content": "You are Qwen, created by Alibaba Cloud. " +
-                         "You are a helpful voice auto-attendant for the company Sippy Software. " +
-                         "Start by greeting the caller and asking how you can help. " +
-                         "Keep your messages brief and concise to reduce latency." +
-                         "The model output is fed into the dumb TTS system for audio output: DO not add any extended formatting."}]
+        self.context = [{"role": "system", "content": params.system_prompt}]
         self.llm = llm
         
     def context_add(self, content:str, role:str = "user"):
