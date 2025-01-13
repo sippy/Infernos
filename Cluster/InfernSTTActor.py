@@ -51,4 +51,3 @@ class InfernSTTActor():
         if self.debug: print('InfernSTTActor.stt_session_soundin')
         sess = self.sessions[sess_id]
         sess.soundin(req)
-        return sess_id
