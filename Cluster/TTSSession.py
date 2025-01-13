@@ -23,7 +23,7 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 # SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-from typing import Optional, Union, List, Tuple
+from typing import Optional, Union, List, Tuple, Dict
 from time import monotonic
 from uuid import uuid4, UUID
 from queue import Queue
@@ -47,32 +47,61 @@ class TTSRequest():
         self.speaker_id = speaker_id
         self.done_cb = done_cb
 
+class TTSSndDispatch():
+    id: UUID
+    debug: bool = False
+    cancelled: bool = False
+    done_cb: Optional[callable] = None
+    cleanup_cb: Optional[callable] = None
+    soundout: callable
+    output_sr: int
+    def __init__(self, soundout:callable, output_sr:int, done_cb:Optional[callable]):
+        self.id = uuid4()
+        self.soundout, self.output_sr, self.done_cb = soundout, output_sr, done_cb
+
+    def cancel(self):
+        self.cancelled = True
+        chunk = ASMarkerNewSent() if self.done_cb is None \
+                                  else ASMarkerSentDoneCB(self.done_cb, sync=True)
+        self.soundout(chunk=chunk)
+        if self.cleanup_cb is not None:
+            self.cleanup_cb()
+
+    def sound_dispatch(self, chunk):
+        if self.cancelled:
+            return
+        do_cleanup = False
+        if chunk is None:
+            if self.debug:
+                print(f'{monotonic():4.3f}: TTSSndDispatch.sound_dispatch {self.done_cb=}')
+            chunk = ASMarkerNewSent() if self.done_cb is None \
+                                      else ASMarkerSentDoneCB(self.done_cb, sync=True)
+            do_cleanup = True
+        elif not isinstance(chunk, ASMarkerGeneric):
+            assert chunk.size(0) > 0
+            chunk=AudioChunk(chunk, self.output_sr)
+        self.soundout(chunk=chunk)
+        if do_cleanup and self.cleanup_cb is not None:
+            self.cleanup_cb()
+
 class TTSSession():
-    debug = False
+    debug = True
     id: UUID
     tts: InfernTTSWorker
     tts_actr: ray.remote
     soundout: callable
+    active_req: Dict[UUID, TTSSndDispatch]
 
     def __init__(self, tts:InfernTTSWorker, tts_actr:ray.remote):
         super().__init__()
         self.id = uuid4()
         self.tts, self.tts_actr = tts, tts_actr
+        self.active_req = {}
 
     def start(self, soundout:callable):
         self.soundout = soundout
 
-    def sound_dispatch(self, chunk, done_cb:callable):
-        if chunk is None:
-            if self.debug:
-                print(f'{monotonic():4.3f}: TTSSession.sound_dispatch {done_cb=}')
-            chunk = ASMarkerNewSent() if done_cb is None else ASMarkerSentDoneCB(done_cb, sync=True)
-        elif not isinstance(chunk, ASMarkerGeneric):
-            assert chunk.size(0) > 0
-            chunk=AudioChunk(chunk, self.tts.output_sr)
-        self.soundout(chunk=chunk)
-
-    def say(self, req:TTSRequest):
+    def say(self, req:TTSRequest) -> UUID:
         if self.debug:
             print(f'{monotonic():4.3f}: TTSSession.say: ${req.text=}, {req.speaker_id=}, {req.done_cb=}')
         if req.speaker_id is not None:
@@ -84,9 +113,25 @@ class TTSSession():
         if len(req.text) > 1:
             req.text.pop(0)
             done_cb = partial(self.tts_actr.tts_session_say.remote, rgen_id=self.id, req=req)
-        soundout = partial(self.sound_dispatch, done_cb=done_cb)
-        req = HelloSippyPlayRequest(self.id, text, speaker, soundout)
-        self.tts.infer(req)
+        trd = TTSSndDispatch(self.soundout, self.tts.output_sr, done_cb)
+        def cleanup_cb():
+            if self.debug:
+                print(f'{monotonic():4.3f}: TTSSession.cleanup_cb')
+            del self.active_req[trd.id]
+        trd.cleanup_cb = cleanup_cb
+        preq = HelloSippyPlayRequest(self.id, text, speaker, trd.sound_dispatch)
+        self.active_req[trd.id] = trd
+        self.tts.infer(preq)
+        return trd.id
+
+    def stop_saying(self, rsay_id:UUID):
+        if self.debug:
+            print(f'{monotonic():4.3f}: TTSSession.stop_saying: {rsay_id=}')
+        trd = self.active_req.get(rsay_id)
+        if trd is None:
+            return False
+        trd.cancel()
+        return True
 
     def stop(self):
         pass

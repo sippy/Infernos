@@ -40,7 +40,11 @@ class InfernTTSActor():
 
     def tts_session_say(self, rgen_id, req:TTSRequest):
         rgen = self.sessions[rgen_id]
-        rgen.say(req)
+        return rgen.say(req)
+
+    def tts_session_stop_saying(self, rgen_id:UUID, rsay_id:UUID):
+        rgen = self.sessions[rgen_id]
+        return rgen.stop_saying(rsay_id)
 
     def tts_session_end(self, rgen_id):
         rgen = self.sessions[rgen_id]

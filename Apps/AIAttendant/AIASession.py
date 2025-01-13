@@ -67,6 +67,7 @@ class AIASession():
     translator: Optional[Translator]
     stt_sess_term: callable
     text_in_buffer: List[str]
+    saying: UUID
 
     def __init__(self, aiaa:'AIAActor', new_sess:RemoteSessionOffer, llm_prompt:str):
         self.id = uuid4()
@@ -95,6 +96,7 @@ class AIASession():
         tts_soundout = TTSProxy(soundout)
         self.tts_sess.start(tts_soundout)
         self.speaker = ray.get(aiaa.tts_actr.get_rand_voice_id.remote())
+        self.speaker = 6852
         self.llm_text_cb = partial(aiaa.aia_actr.text_out.remote, sess_id=self.id)
         self.llm_session_textin = partial(aiaa.llm_actr.llm_session_textin.remote, sess_id=self.llm_sess_id)
         self.llm_session_context_add = partial(aiaa.llm_actr.llm_session_context_add.remote,
@@ -123,9 +125,12 @@ class AIASession():
             else:
                 text = result.text
             self.text_in_buffer.append(text)
-            if len(self.say_buffer) > 1:
+            if len(self.say_buffer) > 0:
                 self.say_buffer = self.say_buffer[:1]
-                self.llm_session_context_add(content='<sentence interrupted>', role='user')
+                if self.saying is not None:
+                    self.llm_session_context_add(content='<sentence interrupted>', role='user')
+                    self.tts_sess.stop_saying(self.saying)
+                    self.saying = None
             return
         if len(self.text_in_buffer) == 0:
             return
@@ -150,7 +155,7 @@ class AIASession():
             self.tts_say(t)
 
     def _tts_say(self, tr:TTSRequest):
-        self.tts_sess.say(tr)
+        self.saying = self.tts_sess.say(tr)
         self.llm_session_context_add(content=tr.text[0], role='assistant')
 
     def tts_say(self, text):
@@ -169,6 +174,7 @@ class AIASession():
         if len(tbuf) > 0:
             self._tts_say(tbuf[0])
             return
+        self.saying = None
 
     def sess_term(self, _):
         self.stt_sess_term()
