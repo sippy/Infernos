@@ -102,9 +102,10 @@ class InfernSTTWorker(InfernBatchedWorker):
             (text.strip(), nsp, gos.tolist()) for text, nsp, gos in
               zip(decoded_texts, no_speech_probs, gen_seq)
         )
+        torch.xpu.synchronize()
         return decoded_results
 
-    def process_batch(self, wis:List[Tuple[STTRequest, List[int]]]):
+    def process_batch(self, wis:List[Tuple[STTRequest, callable, List[int]]]):
         if self.debug:
             print(f'InfernSTTWorker.process_batch: got {len(wis)=}')
         assert all(wi[0].chunk.samplerate == self.sample_rate for wi in wis)
@@ -113,12 +114,12 @@ class InfernSTTWorker(InfernBatchedWorker):
         prompts = self.get_prompt(tuple((wi[0].lang, wi[0].mode, wi[0].timestamps) for wi in wis))
         max_nsps = [wi[0].max_ns_prob for wi in wis]
         good_results = self.infer_and_decode(prompts, inputs, max_nsps)
-        for (wi, c), (r, nsp, t) in zip(wis, good_results):
+        for (wi, text_cb, c), (r, nsp, t) in zip(wis, good_results):
             # Remove leading and trailing space: "WhitespaceTokenizer adds a space at the beginning?" (copilot)
             if len(r) > 0 and r[0] == ' ': r = r[1:]
             if c is not None: c[:] = (c + t)[:-224]
             res = STTResult(text=r, no_speech_prob=nsp, req=wi)
-            wi.text_cb(result = res)
+            text_cb(result = res)
 
     @lru_cache(maxsize=16)
     def get_prompt(self, options:Tuple[Tuple[str, str, bool]]):

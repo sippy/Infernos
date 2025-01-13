@@ -79,8 +79,8 @@ class STTSession():
             else:
                 req.text_cb(result=req)
                 return
-        req.text_cb = partial(self.tts_out, req.text_cb)
-        self.stt.infer((req, self.context))
+        text_cb = partial(self.tts_out, req.text_cb)
+        self.stt.infer((req, text_cb, self.context))
 
     def tts_out(self, text_cb, result:STTResult):
         results = [(text_cb, result)]
@@ -92,8 +92,8 @@ class STTSession():
             while self.pending:
                 req = self.pending.pop(0)
                 if isinstance(req, STTRequest):
-                    req.text_cb = partial(self.tts_out, req.text_cb)
-                    self.stt.infer((req, self.context))
+                    text_cb = partial(self.tts_out, req.text_cb)
+                    self.stt.infer((req, text_cb, self.context))
                     break
                 if all(isinstance(r, STTRequest) for r in self.pending):
                     results.append((req.text_cb, req))
