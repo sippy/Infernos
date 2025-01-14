@@ -15,6 +15,7 @@ from Cluster.InfernBatchedWorker import InfernBatchedWorker
 
 class InfernSTTWorker(InfernBatchedWorker):
     max_batch_size: int = 4
+    max_chunk_duration: float = 32.0
     model: ctranslate2.models.Whisper
     processor: transformers.WhisperProcessor
     device: str
