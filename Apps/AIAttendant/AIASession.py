@@ -9,7 +9,7 @@ from Cluster.TTSSession import TTSRequest
 from Cluster.STTSession import STTRequest, STTResult, STTSentinel
 from Cluster.LLMSession import LLMRequest, LLMResult, LLMSessionParams
 from Cluster.RemoteTTSSession import RemoteTTSSession
-from Cluster.InfernRTPActor import InfernRTPActor
+from Cluster.InfernRTPActor import InfernRTPActor, RTPSessNotFoundErr
 from Core.T2T.NumbersToWords import NumbersToWords
 from RTP.AudioInput import AudioInput
 from SIP.RemoteSession import RemoteSessionOffer, RemoteSessionAccept
@@ -91,7 +91,12 @@ class AIASession():
         self.translator = aiaa.translator
         text_cb = partial(aiaa.aia_actr.text_in.remote, sess_id=self.id)
         vad_handler = STTProxy(aiaa.stt_actr, aiaa.stt_lang, self.stt_sess_id, text_cb)
-        self.rtp_actr.rtp_session_connect.remote(self.rtp_sess_id, vad_handler)
+        try:
+            ray.get(self.rtp_actr.rtp_session_connect.remote(self.rtp_sess_id, vad_handler))
+        except RTPSessNotFoundErr:
+            print(f'RTPSessNotFoundErr: {self.rtp_sess_id=}')
+            sess_term_alice()
+            return
         soundout = partial(self.rtp_actr.rtp_session_soundout.remote, self.rtp_sess_id)
         tts_soundout = TTSProxy(soundout)
         self.tts_sess.start(tts_soundout)
@@ -143,6 +148,9 @@ class AIASession():
         if self.debug: print(f'text_out({result.text=})')
         if result.req_id != self.last_llm_req_id:
             print(f'LLMResult for old req_id: {result.req_id}')
+            return
+        if result.text == '<nothingtosay>':
+            print(f'LLMResult: nothing to say')
             return
         text = sent_tokenize(result.text)
         out_sents = [text.pop(0),]
