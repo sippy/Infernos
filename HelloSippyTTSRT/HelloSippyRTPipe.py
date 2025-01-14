@@ -52,7 +52,7 @@ class HelloSippyPlayRequest(SessDispatchCmd):
         self.text, self.speaker, self.dispatch = text, speaker, dispatch
         super().__init__(session_id)
 
-def make_tensor(x, pp): return torch.tensor([x], dtype=torch.long, device=pp.model.device)
+def make_tensor(x): return torch.tensor([x], dtype=torch.long)
 
 def maybe_half(x): return x.to(memory_format=torch.channels_last, dtype=torch.bfloat16) if not isinstance(x, torch.Tensor) or len(x.shape) > 3 else x.to(dtype=torch.bfloat16)
 
@@ -71,12 +71,12 @@ class HelloSippyPipeState:
     def __init__(self, pp:'HelloSippyRTPipe', req:HelloSippyPlayRequest):
         self.session, self.dispatch = req.session, req.dispatch
         text = req.text if pp.cleanup_text is None else pp.cleanup_text(req.text)
-        self.inputs = pp.processor(text=text, return_tensors="pt")["input_ids"].to(pp.model.device)
-        self.speaker_embeddings = maybe_half(req.speaker).to(pp.model.device)
+        self.inputs = pp.processor(text=text, return_tensors="pt")["input_ids"]
+        self.speaker_embeddings = maybe_half(req.speaker)
         self.encoder_attention_mask = torch.ones_like(self.inputs, dtype=torch.int)
-        self.pre_frames = maybe_half(torch.zeros(1, pp.pre_nframes + pp.post_nframes, pp.model.config.num_mel_bins)).to(pp.model.device)
-        self.starts_at = make_tensor(pp.post_nframes // pp.model.config.reduction_factor, pp)
-        self.ends_at = make_tensor(-1, pp)
+        self.pre_frames = maybe_half(torch.zeros(1, pp.pre_nframes + pp.post_nframes, pp.model.config.num_mel_bins))
+        self.starts_at = make_tensor(pp.post_nframes // pp.model.config.reduction_factor)
+        self.ends_at = make_tensor(-1)
 
 class HelloSippyPipeStateBatched:
     speaker_embeddings:torch.Tensor
@@ -107,7 +107,7 @@ class HelloSippyPipeStateBatched:
                     new_size[1] = max_statelen
                     aval[ia] = pad_tensor_to_target(aval[ia], new_size)
             #print(f'{aname=} {[x.shape for x in aval]=}')
-            setattr(self, aname, torch.cat(aval).contiguous())
+            setattr(self, aname, torch.cat(aval).to(pp.model.device).contiguous())
         encoder_out = pp.model.speecht5.encoder(
             input_values=self.inputs,
             attention_mask=self.encoder_attention_mask,
