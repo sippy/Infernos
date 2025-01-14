@@ -23,6 +23,29 @@ class AudioChunk():
         self.samplerate, self.audio = sample_rate, audio
         return self
 
+    def duration(self):
+        return self.audio.size(0) / self.samplerate
+
+class VadAudioChunk(AudioChunk):
+    debug: bool = False
+    ipos: int
+    def __init__(self, audio:torch.Tensor, samplerate:int, ipos:int):
+        super().__init__(audio, samplerate)
+        self.ipos = ipos
+
+    def tpos(self):
+        return self.ipos / self.samplerate
+
+    def append(self, other:'VadAudioChunk'):
+        assert self.samplerate == other.samplerate
+        if self.debug:
+            print(f'VadAudioChunk.append: {self.ipos=} {self.audio.size(0)=} {other.ipos=} {other.audio.size(0)=}')
+        sdiff = other.ipos - (self.ipos + self.audio.size(0))
+        assert sdiff >= 0
+        if sdiff > 0:
+            self.audio = torch.cat((self.audio, torch.zeros(sdiff, dtype=self.audio.dtype, device=self.audio.device)), dim=0)
+        self.audio = torch.cat((self.audio, other.audio), dim=0)
+
 class AudioChunkFromURL(AudioChunk):
     def __init__(self, url:str, samplerate=8000, dtype=torch.float16, **kwargs):
         response = requests.get(url)

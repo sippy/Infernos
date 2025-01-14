@@ -6,7 +6,7 @@ from typing import Tuple, List, Optional
 import torch
 
 from Cluster.InfernBatchedWorker import InfernBatchedWorker
-from Core.AudioChunk import AudioChunk
+from Core.AudioChunk import AudioChunk, VadAudioChunk
 from Core.VAD.SileroVADUtils import VADIteratorB, VADChannelState, VADBatchFromList
 
 class VADChannel():
@@ -96,12 +96,12 @@ class SileroVADWorker(InfernBatchedWorker):
                     assert poff > 0 and poff < vc.active_buffer.size(0), f'{poff=} {vc.active_buffer.size(0)=} {sd.current_sample=} {active_end=}'
                     obuf = vc.active_buffer[:-poff]
                     assert obuf.size(0) == active_end - vc.active_start, f'{obuf.size(0)=} {vc.active_start=} {active_end=}'
+                    vc.vad_chunk_in(VadAudioChunk(obuf, self.input_sr, vc.active_start))
                     vc.active_start = None
-                    vc.vad_chunk_in(AudioChunk(obuf, self.input_sr))
                 if vc.active_start is None:
                     vc.active_buffer = vc.active_buffer[:self.window_size_samples*2]
                 elif vc.active_buffer.size(0) > self.max_vad_frames:
-                    chunk = AudioChunk(vc.active_buffer[:self.max_vad_frames], self.input_sr)
+                    chunk = VadAudioChunk(vc.active_buffer[:self.max_vad_frames], self.input_sr, vc.active_start)
                     vc.active_buffer = vc.active_buffer[self.max_vad_frames:]
                     vc.active_start += self.max_vad_frames
                     if sd.temp_end != 0:
