@@ -5,7 +5,7 @@ from functools import partial
 from threading import Lock
 from time import monotonic
 
-from Core.AudioChunk import AudioChunk
+from Core.AudioChunk import AudioChunk, VadAudioChunk
 
 class STTRequest():
     lang: str
@@ -66,38 +66,48 @@ class STTSession():
                 print(f'STTSession.soundin({len(req.chunk.audio)=})')
             else:
                 print(f'STTSession.soundin({req=})')
-        if isinstance(req, STTRequest):
-            if req.chunk.samplerate != self.stt.sample_rate:
-                req.chunk.resample(self.stt.sample_rate)
-            req.chunk.audio = req.chunk.audio.numpy()
+        results = []
         with self.state_lock:
+            self.pending.append(req)
             if self.busy:
-                self.pending.append(req)
                 return
-            if isinstance(req, STTRequest):
-                self.busy = True
-            else:
-                req.text_cb(result=req)
-                return
-        text_cb = partial(self.tts_out, req.text_cb)
-        self.stt.infer((req, text_cb, self.context))
+            assert len(self.pending) == 1
+            self.busy = True
+            self._process_pending_stt_lckd(results)
+        for cb, r in results:
+            cb(result=r)
 
-    def tts_out(self, text_cb, result:STTResult):
+    def _process_pending_stt_lckd(self, results:List):
+        while self.pending:
+            req = self.pending.pop(0)
+            if isinstance(req, STTRequest):
+                if isinstance(req.chunk, VadAudioChunk):
+                    nr = next((r for r in self.pending if isinstance(r, STTRequest)), None)
+                    if nr is not None and isinstance(nr.chunk, VadAudioChunk):
+                        ca, cb = req.chunk, nr.chunk
+                        if cb.tpos() + cb.duration() - ca.tpos() < self.stt.max_chunk_duration:
+                            ca.append(cb)
+                            self.pending.remove(nr)
+                            self.pending.insert(0, req)
+                            continue
+                if req.chunk.samplerate != self.stt.sample_rate:
+                    req.chunk.resample(self.stt.sample_rate)
+                req.chunk.audio = req.chunk.audio.numpy()
+                text_cb = partial(self.stt_out, req.text_cb)
+                self.stt.infer((req, text_cb, self.context))
+                break
+            if all(isinstance(r, STTRequest) for r in self.pending):
+                results.append((req.text_cb, req))
+        else:
+            self.busy = False
+
+    def stt_out(self, text_cb, result:STTResult):
         results = [(text_cb, result)]
         with self.state_lock:
             if not hasattr(self, 'stt'):
                 return
-            if self.debug: print(f'STTSession.tts_out({result.text=})')
+            if self.debug: print(f'STTSession.stt_out({result.text=})')
             assert self.busy
-            while self.pending:
-                req = self.pending.pop(0)
-                if isinstance(req, STTRequest):
-                    text_cb = partial(self.tts_out, req.text_cb)
-                    self.stt.infer((req, text_cb, self.context))
-                    break
-                if all(isinstance(r, STTRequest) for r in self.pending):
-                    results.append((req.text_cb, req))
-            else:
-                self.busy = False
+            self._process_pending_stt_lckd(results)
         for cb, r in results:
             cb(result=r)
