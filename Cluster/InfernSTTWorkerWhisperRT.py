@@ -73,4 +73,3 @@ class InfernSTTWorkerWhisperRT(InfernBatchedWorker):
                 new_context = (list(context) + token_trace)[-224:]
                 context[:] = new_context
             text_cb(result=result)
-*** End Patch
