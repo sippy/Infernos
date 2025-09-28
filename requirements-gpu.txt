@@ -1,0 +1,15 @@
+--extra-index-url https://download.pytorch.org/whl/cu124
+
+# Core CUDA runtime stack matching ai_text_to_speech deployment
+torch==2.4.0+cu124
+# torchaudio wheel compiled against the same CUDA build
+torchaudio==2.4.0+cu124
+
+# LLM fine-tuning / quantization helpers for GPU inference
+bitsandbytes==0.43.3
+accelerate==0.34.2
+transformers==4.41.2
+faster-whisper==1.0.3
+
+# Streaming STT acceleration (GPU build ships CUDA kernels)
+ctranslate2==4.4.0
