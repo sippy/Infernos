@@ -6,7 +6,10 @@ from uuid import UUID
 
 import ray
 
+import os
+
 from Cluster.InfernSTTWorker import InfernSTTWorker
+from Cluster.InfernSTTWorkerWhisperRT import InfernSTTWorkerWhisperRT
 from Cluster.STTSession import STTSession, STTRequest, STTSentinel
 
 @ray.remote(num_gpus=0.25, resources={"stt": 1})
@@ -21,15 +24,23 @@ class InfernSTTActor():
 
     def start(self):
         from sys import stderr
-        for device in ('xpu', 'cuda', 'cpu'):
+        impl_choice = os.getenv("INFERNOS_STT_IMPL", "whisper_rt").lower()
+        if impl_choice == "whisper_rt":
             try:
-                self.stt = InfernSTTWorker(device)
-            except (ValueError, RuntimeError):
-                print(f'Failed to initialize STT with {device=}', file=stderr)
-                continue
-            break
-        else:
-            raise RuntimeError('Failed to initialize STT')
+                self.stt = InfernSTTWorkerWhisperRT(device="cuda")
+            except Exception as exc:  # pragma: no cover
+                print(f'Failed to initialize faster-whisper STT: {exc}', file=stderr)
+                impl_choice = "legacy"
+        if impl_choice != "whisper_rt":
+            for device in ('xpu', 'cuda', 'cpu'):
+                try:
+                    self.stt = InfernSTTWorker(device)
+                except (ValueError, RuntimeError):
+                    print(f'Failed to initialize STT with {device=}', file=stderr)
+                    continue
+                break
+            else:
+                raise RuntimeError('Failed to initialize STT')
         self.stt.start()
 
     def stop(self):
