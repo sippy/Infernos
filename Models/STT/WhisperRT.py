@@ -13,9 +13,11 @@ from Cluster.InfernBatchedWorker import InfernBatchedWorker
 from Cluster.STTSession import STTRequest, STTResult
 
 
-class InfernSTTWorkerWhisperRT(InfernBatchedWorker):
+class WhisperRT(InfernBatchedWorker):
     """Inference worker that runs Whisper via faster-whisper on CUDA."""
 
+    provides: str = "whisper_rt"
+    schema: dict = {}
     max_batch_size: int = 2
     max_chunk_duration: float = 24.0
     sample_rate: int = 16000

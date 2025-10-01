@@ -13,7 +13,9 @@ from torch.nn import functional as F
 from Cluster.STTSession import STTRequest, STTResult
 from Cluster.InfernBatchedWorker import InfernBatchedWorker
 
-class InfernSTTWorker(InfernBatchedWorker):
+class Whisper(InfernBatchedWorker):
+    provides: str = "whisper"
+    schema: dict = {}
     max_batch_size: int = 4
     max_chunk_duration: float = 32.0
     model: ctranslate2.models.Whisper
@@ -108,7 +110,7 @@ class InfernSTTWorker(InfernBatchedWorker):
 
     def process_batch(self, wis:List[Tuple[STTRequest, callable, List[int]]]):
         if self.debug:
-            print(f'InfernSTTWorker.process_batch: got {len(wis)=}')
+            print(f'Whisper.process_batch: got {len(wis)=}')
         assert all(wi[0].chunk.samplerate == self.sample_rate for wi in wis)
         audios = [wi[0].chunk.audio for wi in wis]
         inputs = self.process_audios(audios, sampling_rate=self.sample_rate)
