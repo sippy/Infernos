@@ -61,7 +61,7 @@ class SileroVADWorker(InfernBatchedWorker):
     def process_batch(self, wis:List[Tuple[VADChannel, torch.Tensor]]):
         from time import sleep
         #sleep(0.5)
-        #print(f'InfernSTTWorker.process_batch: got {len(wis)=}')
+        #print(f'SileroVADWorker.process_batch: got {len(wis)=}')
         while len(wis) > 0:
             nbatch = []
             cbatch: List[VADChannel] = []

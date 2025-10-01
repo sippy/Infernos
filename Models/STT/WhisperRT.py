@@ -13,7 +13,7 @@ from Cluster.InfernBatchedWorker import InfernBatchedWorker
 from Cluster.STTSession import STTRequest, STTResult
 
 
-class InfernSTTWorkerWhisperRT(InfernBatchedWorker):
+class WhisperRT(InfernBatchedWorker):
     """Inference worker that runs Whisper via faster-whisper on CUDA."""
 
     max_batch_size: int = 2
