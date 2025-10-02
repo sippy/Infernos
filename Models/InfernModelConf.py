@@ -1,5 +1,7 @@
-from typing import Optional
+from typing import Dict, Optional
 from os.path import expanduser
+
+from .InfernModelProfile import InfernModelProfile
 
 class InfernModelConf():
     schema: dict = {
@@ -14,14 +16,20 @@ class InfernModelConf():
             'keysrules': {'type': 'string'},
             'valuesrules': {
                 'type': 'dict',
-                'schema': {
-                    'uses': {'type': 'string'},
-                }
+                'schema': InfernModelProfile.schema,
             }
         }
     }
     cache_dir: str = '~/.cache/Infernos'
+    profiles: Dict[str, InfernModelProfile]
 
-    def __init__(self, conf:Optional[dict]=None):
-        cdir = conf['cache_dir'] if conf is not None and 'cache_dir' in conf else self.cache_dir
+    def __init__(self, conf: Optional[dict] = None):
+        conf = conf or {}
+        settings = conf.get('settings') or {}
+        cdir = settings.get('cache_dir', self.cache_dir)
         self.cache_dir = expanduser(cdir)
+        profiles_conf = conf.get('profiles') or {}
+        self.profiles = {
+            name: InfernModelProfile(name, profile_conf)
+            for name, profile_conf in profiles_conf.items()
+        }
