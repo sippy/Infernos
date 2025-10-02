@@ -5,6 +5,7 @@ from Cluster.InfernSIPActor import InfernSIPActor
 from SIP.InfernSIPConf import InfernSIPConf
 from SIP.InfernSIPProfile import InfernSIPProfile
 from RTP.InfernRTPConf import InfernRTPConf
+from Models.InfernModelConf import InfernModelConf
 
 from .ConfigValidators import validate_yaml
 
@@ -23,6 +24,12 @@ schema = {
             **InfernRTPConf.schema,
         }
     },
+    'models': {
+        'type': 'dict',
+        'schema': {
+            **InfernModelConf.schema,
+        }
+    },
     'apps': {
         'type': 'dict',
         'schema': {
@@ -36,6 +43,7 @@ class InfernConfig():
     sip_conf: Optional[InfernSIPConf]
     rtp_conf: Optional[InfernRTPConf]
     connectors: Dict[str, InfernSIPProfile]
+    model_conf: Optional[InfernModelConf]
     apps: Dict[str, Union['LTProfile', 'AIAProfile']]
     def __init__(self, filename: str):
         from Apps.LiveTranslator.LTProfile import LTProfile
@@ -47,6 +55,7 @@ class InfernConfig():
         d = validate_yaml(schema, filename)
         self.sip_conf = InfernSIPConf(d['sip'].get('settings', None)) if 'sip' in d else None
         self.rtp_conf = InfernRTPConf(d['rtp'].get('settings', None)) if 'rtp' in d else None
+        self.model_conf = InfernModelConf(d.get('models'))
         try:
             self.connectors = dict((f'sip/{name}', InfernSIPProfile(name, conf))
                                 for name, conf in d['sip']['profiles'].items())

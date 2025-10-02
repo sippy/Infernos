@@ -14,6 +14,16 @@ from Cluster.STTSession import STTRequest, STTResult
 from Cluster.InfernBatchedWorker import InfernBatchedWorker
 
 class Whisper(InfernBatchedWorker):
+    provides: str = "whisper"
+    schema: dict = {
+        'device': {
+            'type': 'string',
+            'allowed': ['cpu', 'cuda', 'xpu'],
+        },
+        'model_name': {
+            'type': 'string',
+        },
+    }
     max_batch_size: int = 4
     max_chunk_duration: float = 32.0
     model: ctranslate2.models.Whisper

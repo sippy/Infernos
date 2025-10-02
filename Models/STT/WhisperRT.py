@@ -16,6 +16,28 @@ from Cluster.STTSession import STTRequest, STTResult
 class WhisperRT(InfernBatchedWorker):
     """Inference worker that runs Whisper via faster-whisper on CUDA."""
 
+    provides: str = "whisper_rt"
+    schema: dict = {
+        'device': {
+            'type': 'string',
+            'allowed': ['auto', 'cpu', 'cuda'],
+        },
+        'model_size': {
+            'type': 'string',
+        },
+        'compute_type': {
+            'type': 'string',
+            'allowed': ['int8', 'int8_float16', 'int8_float32', 'float16', 'float32'],
+        },
+        'beam_size': {
+            'type': 'integer',
+            'min': 1,
+            'coerce': int,
+        },
+        'cache_dir': {
+            'type': 'string',
+        },
+    }
     max_batch_size: int = 2
     max_chunk_duration: float = 24.0
     sample_rate: int = 16000
