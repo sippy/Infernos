@@ -92,7 +92,7 @@ def wq_getscript(film, character, section=1):
     film = film.replace(' ', '_')
     fsuf = '_(film)'
     url = f"{BASE_URL}?title={film}&section={section}"
-    start_pattern = rf">{character}<"
+    start_pattern = rf">{character}</b"
     end_pattern = r'</dd>'
     try:
         cont = extract_content(url, start_pattern, end_pattern)
@@ -116,12 +116,12 @@ def bender_set(season=1):
     return [s for s in contents if len(s) > 16]
 
 def smith_set():
-    contents = wq_getscript('The Matrix', 'Agent Smith', section=4)
-    hp = 'As you can see, we'
-    hack = contents[0].split(hp)
-    if len(hack) <= 2:
-        raise Exception("cleanme, hack is not needed perhaps anymore")
-    contents[0] = hp + hack[-1]
+    contents = wq_getscript('The Matrix_(film)', 'Agent Smith', section=4)
+    #hp = 'As you can see, we'
+    #hack = contents[0].split(hp)
+    #if len(hack) <= 2:
+    #    raise Exception(f"{contents[0]:}cleanme, hack is not needed perhaps anymore")
+    #contents[0] = hp + hack[-1]
     return [s.replace('. ', '.|') for s in contents]
 
 def t900_set():
