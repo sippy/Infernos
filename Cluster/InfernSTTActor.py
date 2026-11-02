@@ -24,7 +24,7 @@ class InfernSTTActor():
         for device in ('xpu', 'cuda', 'cpu'):
             try:
                 self.stt = InfernSTTWorker(device)
-            except (ValueError, RuntimeError):
+            except (ValueError, RuntimeError, ModuleNotFoundError):
                 print(f'Failed to initialize STT with {device=}', file=stderr)
                 continue
             break
