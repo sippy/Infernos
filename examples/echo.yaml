@@ -1,0 +1,20 @@
+# Replace the addresses with this host's bind IP and the caller/PBX IP.
+sip:
+  settings:
+    bind: 127.0.0.1:5060
+  profiles:
+    incoming:
+      sip_server: 127.0.0.1:5060
+      sink: apps/echo/default
+      register: False
+rtp:
+  settings:
+    min_port: 1024
+    max_port: 2048
+apps:
+  echo:
+    profiles:
+      default:
+        stt_lang: en
+        tts_lang: en
+        greeting: Welcome to the future

@@ -116,6 +116,41 @@ community for their priceless insights and tireless contributions.
 - [Infernos: cost efficient AI inference for real-time applications:](https://www.youtube.com/watch?v=eawO0hXeO5Y)
   Overview of the Infernos architecture and progress over the past few months.
 
+## Echo Application
+
+The Echo application provides a simple test harness for STT/TTS pipelines:
+
+```bash
+cat > echo_config.yaml <<EOF
+sip:
+  settings:
+    bind: 127.0.0.1:5060
+  profiles:
+    incoming:
+      sip_server: 127.0.0.1:5060
+      sink: apps/echo/default
+      register: False
+rtp:
+  settings:
+    min_port: 1024
+    max_port: 2048
+apps:
+  echo:
+    profiles:
+      default:
+        stt_lang: en
+        tts_lang: en
+        greeting: Welcome to the future
+EOF
+python Infernos.py -f -L ~/Infernos.log echo_config.yaml
+```
+
+### Echo Configuration Options
+
+- `stt_lang`: Language code for speech-to-text (e.g., 'en', 'de', 'fr')
+- `tts_lang`: Language code for text-to-speech
+- `greeting`: Optional greeting message spoken on session start
+
 ## Join US
 
 - [Discord](https://discord.gg/bb95ZWhrhQ)
