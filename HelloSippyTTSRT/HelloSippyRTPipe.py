@@ -6,7 +6,6 @@ from typing import List, Optional
 
 import torch
 from torch.nn import functional as F
-from datasets import load_dataset
 from methodtools import lru_cache
 
 try: from config.InfernGlobals import InfernGlobals
@@ -21,6 +20,7 @@ from transformers import SpeechT5ForTextToSpeech, SpeechT5HifiGanConfig, SpeechT
 import torchaudio.transforms as T
 
 from HelloSippyTTSRT.HelloSippyRT import AmendmentNetwork1, AmendmentNetwork1Config
+from HelloSippyTTSRT.xvector_loader import load_speaker_embeddings
 
 def pad_tensor_to_target(tensor, target_size, pre=False):
     if tuple(tensor.shape) == tuple(target_size): return tensor
@@ -178,9 +178,8 @@ class HelloSippyRTPipe:
             chunker = maybe_half(chunker).to(device)
             chunker.eval()
             self.chunker = chunker
-            embeddings_dataset = load_dataset("Matthijs/cmu-arctic-xvectors", split="validation")
-            self.speaker_embeddings = [torch.tensor(ed["xvector"], device='cpu').unsqueeze(0)
-                                        for ed in sorted(embeddings_dataset, key=lambda x: x['filename'])]
+            # Load speaker embeddings using script-free loader (datasets5 compatible)
+            self.speaker_embeddings = load_speaker_embeddings(device='cpu')
             for x in [_x for x in (self.model.parameters, self.vocoder.parameters, self.chunker.parameters) for _x in x()] + self.speaker_embeddings: x.requires_grad = False
             if self.model_sr != output_sr:
                 self.resampler = maybe_half(T.Resample(orig_freq=self.model_sr, new_freq=output_sr)).to(device)
