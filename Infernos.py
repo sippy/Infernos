@@ -14,16 +14,20 @@ def patch_signals():
     import threading
     import signal
 
-    def _start_new_thread(*args):
+    def _start_new_thread(*args, **kwa):
         allsigs = list(signal.valid_signals())
 
         old_sigset = signal.pthread_sigmask(signal.SIG_BLOCK, allsigs)
-        ret = _old_start_new_thread(*args)
+        ret = _old_start_new_thread(*args, **kwa)
         signal.pthread_sigmask(signal.SIG_SETMASK, old_sigset)
         return ret
 
-    _old_start_new_thread = threading._start_new_thread
-    threading._start_new_thread = _start_new_thread
+    try:
+        _old_start_new_thread = threading._start_new_thread
+        threading._start_new_thread = _start_new_thread
+    except AttributeError:
+        _old_start_new_thread = threading._start_joinable_thread
+        threading._start_joinable_thread = _start_new_thread
 
 def usage():
     print('usage: Infernos.py [-f] [-L logfile] [-i pidfile] [myconfig.yaml]')
@@ -67,6 +71,7 @@ if __name__ == '__main__':
     default_resources = InfernSIPActor.default_resources
     default_resources['live_translator'] = 1
     default_resources['ai_attendant'] = 1
+    default_resources['echo'] = 1
     default_resources['tts'] = 2
     default_resources['stt'] = 1
     default_resources['llm'] = 1
