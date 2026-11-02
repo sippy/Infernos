@@ -1,161 +1,177 @@
-from typing import Optional, Union
+"""sippy jitter/codec handling followed by queued Infernos VAD processing."""
+
+from array import array
 from queue import Queue
 from threading import Lock
 from uuid import UUID
-
-from rtpsynth.RtpJBuf import RtpJBuf, RTPFrameType, RTPParseError
-
+import torch
+from rtpsynth.RtpJBuf import RtpJBuf
+from sippy.Rtp.Ingest import RTPInStream as SippyRTPInStream
+from sippy.Rtp.Codecs.G722 import G722Codec
+from Core.AudioChunk import AudioChunk
 from Core.InfernWrkThread import InfernWrkThread, RTPWrkTRun
 from Core.VAD.SileroVAD import SileroVADWorker, VADChannel
-from Core.Codecs.G711 import G711Codec
-from Core.AudioChunk import AudioChunk
+from RTP.AudioBridge import to_infernos
 from RTP.AudioInput import AudioInput
-from RTP.RTPParams import RTPParams
 
-class WIPkt():
-    def __init__(self, stream: 'RTPInStream', data, address, rtime):
+
+class WIStreamAudio:
+    def __init__(self, stream, chunk):
+        self.stream, self.chunk = stream, chunk
+
+
+class WIStreamConnect:
+    def __init__(self, stream, ain):
+        self.stream, self.ain = stream, ain
+
+
+class WIStreamUpdate:
+    def __init__(self, stream):
         self.stream = stream
-        self.data = data
-        self.address = address
-        self.rtime = rtime
 
-class WIStreamUpdate():
-    def __init__(self, stream: 'RTPInStream'):
-        self.stream = stream
 
-class WIStreamConnect():
-    def __init__(self, stream: 'RTPInStream', ain:AudioInput):
-        self.stream = stream
-        self.ain = ain
+class _G722IngressCodec(G722Codec):
+    """Bridge the installed sippy silence() argument mismatch locally.
 
-class RTPInStream():
-    jb_size: int = 8
-    input_sr: int = 8000
-    last_output_lseq: Optional[int] = None
-    vchan: VADChannel
-    codec: G711Codec
-    output_sr: int = 16000
-    npkts: int = 0
-    ain: AudioInput
-    ain_lock: Lock
-    get_direct_soundout: callable
-    def __init__(self, ring:'InfernRTPIngest', rtp_params:RTPParams, get_direct_soundout:callable):
-        self.jbuf = RtpJBuf(self.jb_size)
-        self.codec = rtp_params.codec().to(ring.device)
+    Encoding/decoding remain inherited from sippy. Concealment is sized in the
+    codec's native sample rate, not the resampled VAD output rate.
+    """
+
+    def silence(self, nframes):
+        pcm = array('h', [0]) * self.e2d_frames(nframes, out_srate=self.srate)
+        return self.encode(self.make_chunk(pcm, self.srate))
+
+
+class RTPInStream(SippyRTPInStream):
+    def __init__(self, ring, rtp_params, get_direct_soundout):
         self.ring = ring
+        self.rtp_params = rtp_params
         self.get_direct_soundout = get_direct_soundout
         self.ain = AudioInput()
         self.ain_lock = Lock()
-        self.vchan = VADChannel(self.audio_chunk_out, self.vad_chunk_out, self.codec.decode, ring.device)
+        self._closed = False
+        self._pending_audio = torch.empty(0)
+        self.vchan = VADChannel(self.audio_chunk_out, self.vad_chunk_out, None, ring.device)
+        super().__init__(rtp_params, self._queue_audio)
+        self._configure_codec()
+        ring.add_stream(self)
 
-    def rtp_received(self, data, address, rtime):
-        #self.dprint(f"InfernRTPIngest.rtp_received: len(data) = {len(data)}")
-        self.ring.pkt_queue.put(WIPkt(self, data, address, rtime))
+    def _configure_codec(self):
+        if type(self.codec) is G722Codec:
+            self.codec = _G722IngressCodec()
+        self.codec.out_srate = self.rtp_params.out_sr
+
+    def _queue_audio(self, chunk):
+        if not self._closed:
+            self.ring.pkt_queue.put(WIStreamAudio(self, chunk))
+
+    def stream_connect(self, ain):
+        def resolve(callback):
+            return self.get_direct_soundout(callback) if isinstance(callback, UUID) else callback
+        connected = AudioInput(audio_in=resolve(ain.audio_in), vad_chunk_in=resolve(ain.vad_chunk_in))
+        self.ring.pkt_queue.put(WIStreamConnect(self, connected))
 
     def stream_update(self):
-        self.ring.pkt_queue.put(WIStreamUpdate(self))
-
-    def stream_connect(self, ain:AudioInput):
-        if isinstance(ain.vad_chunk_in, UUID): ain.vad_chunk_in = self.get_direct_soundout(ain.vad_chunk_in)
-        if isinstance(ain.audio_in, UUID): ain.audio_in = self.get_direct_soundout(ain.audio_in)
-        self.ring.pkt_queue.put(WIStreamConnect(self, ain))
-
-    def _proc_in_tread(self, wi:Union[WIPkt,WIStreamUpdate], svad:SileroVADWorker):
-        def dprint(msg:str): return self.ring.dprint(f'InfernRTPIngest.run: {msg}') if self.ring.debug else None
-
-        if isinstance(wi, WIStreamUpdate):
-            dprint("stream update")
+        with self.ring_lock:
             self.jbuf = RtpJBuf(self.jb_size)
             self.last_output_lseq = None
+            self.out_buffer = b''
+            self.ob_rtime = 0.0
+            self.codec = self.rtp_params.codec()
+            self._configure_codec()
+            self.out_chunk_sz_samples = self.rtp_params.out_sr // 10
+            # Preserve reset/PCM ordering against concurrent packet callbacks.
+            self.ring.pkt_queue.put(WIStreamUpdate(self))
+
+    def _proc_in_tread(self, wi, svad):
+        if self._closed:
             return
         if isinstance(wi, WIStreamConnect):
-            dprint("stream connect")
             with self.ain_lock:
                 self.ain = wi.ain
             return
-        data, address, rtime = wi.data, wi.address, wi.rtime
-        try:
-            res = self.jbuf.udp_in(data)
-        except RTPParseError as e:
-            dprint(f"RTPParseError: {e}")
+        if isinstance(wi, WIStreamUpdate):
+            self._pending_audio = torch.empty(0)
             return
-        self.npkts += 1
-        if self.npkts == 1:
-            dprint(f"address={address}, rtime={rtime}, len(data) = {len(data)} data={data[:40]}")
-        for pkt in res:
-            if pkt.content.type == RTPFrameType.ERS:
-                print(f"ERS packet received {pkt.content.lseq_start=}, {pkt.content.lseq_end=} {pkt.content.ts_diff=}")
-                self.last_output_lseq = pkt.content.lseq_end
-                rtp_data = self.codec.silence(pkt.content.ts_diff)
-            else:
-                if self.npkts < 10:
-                    dprint(f"{pkt.content.frame.rtp.lseq=}")
-                assert self.last_output_lseq is None or pkt.content.frame.rtp.lseq == self.last_output_lseq + 1
-                self.last_output_lseq = pkt.content.frame.rtp.lseq
-                if self.npkts < 10:
-                    dprint(f"{len(pkt.rtp_data)=}, {type(pkt.rtp_data)=}")
-                rtp_data = pkt.rtp_data
-            self.vchan.ingest(svad, rtp_data, self.codec)
-        if self.npkts < 10 and len(res) > 0:
-            dprint(f"{res=}")
+        chunk = to_infernos(wi.chunk)
+        if chunk.samplerate != svad.input_sr:
+            chunk.resample(svad.input_sr)
+        self._pending_audio = torch.cat((self._pending_audio, chunk.audio.cpu()))
+        size = svad.window_size_samples
+        while self._pending_audio.numel() >= size:
+            audio, self._pending_audio = self._pending_audio[:size], self._pending_audio[size:]
+            svad.infer((self.vchan, AudioChunk(audio, svad.input_sr)))
 
-    def audio_chunk_out(self, chunk:AudioChunk, active:bool):
+    def audio_chunk_out(self, chunk, active):
         chunk.active = active
         with self.ain_lock:
-            if self.ain.audio_in is None: return
-            self.ain.audio_in(chunk=chunk)
+            callback = None if self._closed else self.ain.audio_in
+        if callback is not None:
+            callback(chunk=chunk)
 
-    def vad_chunk_out(self, chunk:AudioChunk):
+    def vad_chunk_out(self, chunk):
         with self.ain_lock:
-            if self.ain.vad_chunk_in is None: return
-            self.ain.vad_chunk_in(chunk=chunk)
+            callback = None if self._closed else self.ain.vad_chunk_in
+        if callback is not None:
+            callback(chunk=chunk)
+
+    def close(self):
+        if not self._closed:
+            self._closed = True
+            self.ring.remove_stream(self)
+            with self.ain_lock:
+                self.ain = AudioInput()
+
 
 class InfernRTPIngest(InfernWrkThread):
     debug = False
-    pkt_queue: Queue[Union[WIPkt,WIStreamUpdate,WIStreamConnect]]
-    _start_queue: Queue[int]
-    def __init__(self, device:str):
+
+    def __init__(self, device):
         super().__init__()
-        self.pkt_queue = Queue()
         self.device = device
+        self.pkt_queue = Queue()
+        self.streams = []
+
+    def add_stream(self, stream):
+        with self.state_lock:
+            self.streams.append(stream)
+
+    def remove_stream(self, stream):
+        with self.state_lock:
+            if stream in self.streams:
+                self.streams.remove(stream)
 
     def start(self):
         self._start_queue = Queue()
         super().start()
-        r = self._start_queue.get()
-        if isinstance(r, Exception):
-            super().join()
-            raise r
+        result = self._start_queue.get()
         del self._start_queue
-
-    def dprint(self, *args):
-        if self.debug:
-            print(*args)
-
-    def run(self):
-        super().thread_started()
-        try:
-            svad = SileroVADWorker(self.device)
-            svad.start()
-        except Exception as e:
-            self._start_queue.put(e)
-            return
-        self._start_queue.put(0)
-        self.dprint("InfernRTPIngest started")
-        data, address, rtime = (None, None, None)
-        while self.get_state() == RTPWrkTRun:
-            wi = self.pkt_queue.get()
-            if wi is None: break
-            wi.stream._proc_in_tread(wi, svad)
-        svad.stop()
-#        if data is not None:
-#            self.dprint(f"InfernRTPIngest.run: last packet: address={address}, rtime={rtime}, len(data) = {len(data)} data={data[:40]}")
-#        self.dprint(f"InfernRTPIngest.run: exiting, total packets received: {npkts}")
+        if isinstance(result, Exception):
+            super().join()
+            raise result
 
     def stop(self):
         self.pkt_queue.put(None)
         super().stop()
-        self.dprint("InfernRTPIngest stopped")
 
-    def __del__(self):
-        self.dprint("InfernRTPIngest.__del__")
+    def run(self):
+        self.thread_started()
+        try:
+            svad = SileroVADWorker(self.device)
+            svad.start()
+        except Exception as error:
+            self._start_queue.put(error)
+            return
+        self._start_queue.put(None)
+        try:
+            while self.get_state() == RTPWrkTRun:
+                wi = self.pkt_queue.get()
+                if wi is None:
+                    break
+                wi.stream._proc_in_tread(wi, svad)
+        finally:
+            svad.stop()
+
+    def dprint(self, *args):
+        if self.debug:
+            print(*args)

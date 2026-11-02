@@ -5,7 +5,7 @@ import torch
 import torch.nn.functional as F
 
 from .AudioChunk import AudioChunk
-from .AStreamMarkers import ASMarkerGeneric, ASMarkerNewSent
+from .AStreamMarkers import ASMarkerGeneric
 
 class OutputMuxer():
     debug = False
@@ -34,12 +34,12 @@ class OutputMuxer():
             return None
         while len(self.chunks_in) > 0 and (rsize:=self.qsize-chunk_o.size(0)) > 0:
             chunk = self.chunks_in[0]
-            if isinstance(chunk, ASMarkerNewSent):
+            if isinstance(chunk, ASMarkerGeneric):
                 #self.update_frm_ctrs(prcsd_inc=pos.get_buf_nframes())
                 if chunk_o.size(0) > 0:
                     return chunk_o
                 if self.debug:
-                    print(f'{monotonic():4.3f}: ASMarkerNewSent {chunk.on_proc=}')
+                    print(f'{monotonic():4.3f}: stream marker {type(chunk).__name__}')
                 self.chunks_in.pop(0)
                 chunk.on_proc(rtp_worker)
                 continue

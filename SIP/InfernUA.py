@@ -35,7 +35,9 @@ from sippy.SipReason import SipReason
 
 from Cluster.RemoteRTPGen import RemoteRTPGen
 from RTP.RTPParams import RTPParams
-from Core.Codecs.G711 import G711Codec
+# Use sippy codec directly - no dependency on local Core.Codecs
+from sippy.Rtp.Codecs.G711 import G711Codec as SippyG711Codec
+G711Codec = SippyG711Codec  # Alias for compatibility
 
 ULAW_PT = 0
 ULAW_RM = 'PCMU/8000'
@@ -77,7 +79,9 @@ class InfernUA(UA):
         if p is None: return None
         return p.rtp_target
 
-    def extract_rtp_params(self, sdp_body, accept=(G711Codec,)):
+    def extract_rtp_params(self, sdp_body, accept=None):
+        if accept is None:
+            accept = getattr(self, 'accept_codecs', getattr(self, 'offer', (G711Codec,)))
         if sdp_body == None:
             event = InfernUASFailure("late offer/answer is not supported at this time, sorry")
             self.recvEvent(event)

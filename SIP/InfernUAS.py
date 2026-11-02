@@ -35,8 +35,10 @@ from SIP.InfernUA import InfernUA, model_body, InfernUASFailure
 from SIP.RemoteSession import RemoteSessionAccept
 from SIP.InfernSIPProfile import InfernSIPProfile
 from SIP.SipSessInfo import SipSessInfo
-from Core.Codecs.G711 import G711Codec
-from Core.Codecs.G722 import G722Codec
+# Use sippy codec directly - no dependency on local Core.Codecs
+from sippy.Rtp.Codecs.G711 import G711Codec as SippyG711Codec
+G711Codec = SippyG711Codec  # Alias for compatibility
+from sippy.Rtp.Codecs.G722 import G722Codec
 
 class CCEventSentDone: pass
 class CCEventSTTTextIn:

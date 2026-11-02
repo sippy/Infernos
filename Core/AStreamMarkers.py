@@ -10,9 +10,14 @@ class ASMarkerGeneric():
     def __init__(self, track_id:int=0):
         self.track_id = track_id
 
+    def on_proc(self, rtp_worker, *args):
+        """No-op callback for stream markers; subclasses override for specific behavior."""
+        pass
+
 class ASMarkerNewSent(ASMarkerGeneric):
     # This runs in the context of the RTPOutputWorker thread
-    def on_proc(self, tro_self, *args): pass
+    # Inherits on_proc no-op from ASMarkerGeneric; retained for class identity.
+    pass
 
 class ASMarkerSentDoneCB(ASMarkerNewSent):
     debug = False

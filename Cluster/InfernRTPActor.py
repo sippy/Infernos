@@ -39,7 +39,7 @@ class InfernRTPActor():
         print(f'{IG.stdtss()}: new_rtp_session')
         rep = InfernRTPEPoint(self.inf_rc, rtp_params, self.ring, self._get_direct_soundout)
         self.sessions[rep.id] = rep
-        return (rep.id, rep.rserv.uopts.laddress)
+        return (rep.id, rep.rserv.local_addr)
 
     def rtp_session_connect(self, rtp_id, ain:AudioInput):
         print(f'{IG.stdtss()}: rtp_session_connect[{str(rtp_id)[:6]}]')
@@ -83,13 +83,19 @@ class InfernRTPActor():
         rep.update(rtp_params)
 
     def start(self):
+        import torch
         for device in self.devices:
-            self.ring = InfernRTPIngest(device)
+            if device == 'mps' and not (torch.backends.mps.is_built() and torch.backends.mps.is_available()):
+                continue
+            if device == 'cuda' and not torch.cuda.is_available():
+                continue
+            ring = InfernRTPIngest(device)
             try:
-                self.ring.start()
+                ring.start()
             except (AssertionError, RuntimeError):
                 print(f'{device} did not work')
                 continue
+            self.ring = ring
             self.device = device
             break
         else:
