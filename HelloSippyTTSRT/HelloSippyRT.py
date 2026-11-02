@@ -215,6 +215,12 @@ class AmendmentNetwork1(PreTrainedModel):
         self.resblock = SimpleResidualBlock(64)
         self.post_conv = nn.Conv1d(in_channels=64, out_channels=_c.frame_size,
                                    kernel_size=8, stride=24, padding=0)
+        try:
+            post_init = self.post_init
+        except AttributeError:
+            pass
+        else:
+            post_init()
 
     def forward(self, mel, audio):
         batch_size, total_length = audio.size()
