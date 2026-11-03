@@ -44,3 +44,12 @@ SIP negotiation and the writer still use the actual sippy G722Codec class.
 No installed package is edited. Dropped-packet tests cover both 8 kHz and 16 kHz
 resampled receive outputs and check concealment payload length in the RTP clock domain.
 The SDP tests use the actual UAS/UAC codec policies, not manually substituted codecs.
+
+## G.711 A-law (PCMA)
+
+Requires sippy >= 2.5.1 and rtpsynth >= 1.4.0. Infernos uses upstream
+`G711ALawCodec` (static RTP payload type 8, PCMA/8000), including native
+A-law conversion and packet-loss silence. It is accepted on incoming calls
+and included in outgoing SDP offers. Existing codec preferences are retained:
+incoming G722, PCMU, PCMA; outgoing PCMU, G722, PCMA. PCMU remains the RTP
+parameter default. Codec changes on SIP updates use the same endpoint adapters.

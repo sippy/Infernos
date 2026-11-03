@@ -2,7 +2,7 @@
 
 from Core.AudioChunk import AudioChunk
 from sippy.Rtp.Handlers import RTPHandlers
-from sippy.Rtp.Codecs.G711 import G711Codec
+from sippy.Rtp.Codecs.G711 import G711Codec, G711ALawCodec
 from sippy.Rtp.Codecs.G722 import G722Codec
 from RTP.RTPParams import RTPParams
 from RTP.InfernRTPConf import InfernRTPConf
@@ -13,6 +13,6 @@ from RTP.RTPOutputWorker import RTPOutputWorker
 RTPEPoint = InfernRTPEPoint
 RTPConf = InfernRTPConf
 
-__all__ = ['AudioChunk', 'RTPHandlers', 'G711Codec', 'G722Codec', 'RTPParams',
+__all__ = ['AudioChunk', 'RTPHandlers', 'G711Codec', 'G711ALawCodec', 'G722Codec', 'RTPParams',
            'RTPConf', 'InfernRTPConf', 'InfernRTPIngest', 'RTPInStream',
            'RTPEPoint', 'InfernRTPEPoint', 'RTPOutputWorker']

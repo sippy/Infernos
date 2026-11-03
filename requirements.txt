@@ -1,4 +1,4 @@
-sippy>=2.5.0
+sippy>=2.5.1
 ray
 transformers>=4.0.0
 datasets>=2.0.0
@@ -19,6 +19,6 @@ prometheus_client
 py-spy
 nltk
 G722
-rtpsynth
+rtpsynth>=1.4.0
 cerberus
 pyyaml

@@ -10,7 +10,7 @@ from uuid import uuid4
 
 import torch
 from sippy.Rtp.Core.AudioChunk import AudioChunk as SippyAudioChunk
-from sippy.Rtp.Codecs.G711 import G711Codec
+from sippy.Rtp.Codecs.G711 import G711Codec, G711ALawCodec
 from sippy.Rtp.Codecs.G722 import G722Codec
 from Core.AudioChunk import AudioChunk
 from Core.AStreamMarkers import ASMarkerGeneric, ASMarkerNewSent, ASMarkerSentDoneCB
@@ -152,6 +152,169 @@ class AudioPathTests(unittest.TestCase):
                 endpoint.soundout(AudioChunk(torch.full((160,), .25), 8000))
                 self.tick(endpoint.writer)
                 self.assertEqual(endpoint.rserv.packets[0][1] & 127, 9)
+
+    def test_pcma_only_sdp_negotiation_and_payload(self):
+        from SIP.InfernUA import model_body
+        from SIP.InfernUAS import InfernUAS
+        from SIP.InfernUAC import InfernUAC
+        for cls in (InfernUAS, InfernUAC):
+            with self.subTest(cls=cls.__name__):
+                ua = cls.__new__(cls)
+                body = model_body.getCopy()
+                body.content.sections[0].m_header.formats = [8, 101]
+                selected = ua.extract_rtp_params(body)
+                self.assertIs(selected.codec, G711ALawCodec)
+                endpoint, ring = self.make_endpoint(selected.codec)
+                endpoint.soundout(AudioChunk(torch.full((160,), .25), 8000))
+                self.tick(endpoint.writer)
+                packet = endpoint.rserv.packets[0]
+                self.assertEqual(packet[1] & 127, 8)
+                # Known A-law encoding for PCM16 +8192, not a codec roundtrip oracle.
+                self.assertEqual(packet[12:], b'\xb5' * 160)
+
+    def test_incoming_pcma_offer_builds_pcma_answer(self):
+        from SIP.InfernUA import model_body
+        from SIP.InfernUAS import InfernUAS
+        from sippy.CCEvents import CCEventTry
+        module = importlib.import_module('SIP.InfernUAS')
+        ua = InfernUAS.__new__(InfernUAS)
+        ua.rtp_actr, ua.disc_cbs, ua.auto_answer = Mock(), (), True
+        body = model_body.getCopy()
+        body.content.sections[0].m_header.formats = [8, 101]
+        event = CCEventTry(('call-id', '100', '200', body, None, 'Caller'))
+        with patch.object(module, 'RemoteRTPGen', return_value=SimpleNamespace(
+                rtp_address=('127.0.0.1', 24000))) as create, \
+             patch.object(ua, 'send_uas_resp') as answer:
+            ua.outEvent(event, ua)
+        self.assertIs(create.call_args.args[1].codec, G711ALawCodec)
+        self.assertEqual(ua.our_sdp_body.content.sections[0].m_header.formats, [8])
+        self.assertIn('rtpmap:8 PCMA/8000', str(ua.our_sdp_body))
+        answer.assert_called_once_with()
+
+    def test_pcma_answer_and_reinvite_update_remote_session(self):
+        from SIP.InfernUA import model_body
+        from SIP.InfernUAS import InfernUAS
+        from SIP.InfernUAC import InfernUAC
+        from sippy.CCEvents import CCEventConnect, CCEventUpdate
+        ua = InfernUAC.__new__(InfernUAC)
+        ua.rsess = Mock()
+        body = model_body.getCopy()
+        body.content.sections[0].m_header.formats = [8]
+        ua.outEvent(CCEventConnect((200, 'OK', body)), ua)
+        self.assertIs(ua.rsess.update.call_args.args[0].codec, G711ALawCodec)
+        uas = InfernUAS.__new__(InfernUAS)
+        uas.rsess = Mock()
+        with patch.object(uas, 'send_uas_resp') as answer:
+            uas.outEvent(CCEventUpdate(body), uas)
+        self.assertIs(uas.rsess.update.call_args.args[0].codec, G711ALawCodec)
+        answer.assert_called_once_with()
+
+    def test_pcma_addition_preserves_existing_codec_preferences(self):
+        from SIP.InfernUA import model_body
+        from SIP.InfernUAS import InfernUAS
+        from SIP.InfernUAC import InfernUAC
+        for cls, expected in ((InfernUAS, G722Codec), (InfernUAC, G711Codec)):
+            ua = cls.__new__(cls)
+            body = model_body.getCopy()
+            body.content.sections[0].m_header.formats = [8, 0, 9]
+            self.assertIs(ua.extract_rtp_params(body).codec, expected)
+
+    def test_outgoing_sdp_advertises_pcma_in_formats_and_rtpmap(self):
+        from SIP.InfernUA import InfernUA
+        from SIP.InfernUAC import InfernUAC
+        module = importlib.import_module('SIP.InfernUAC')
+        ua = InfernUAC.__new__(InfernUAC)
+        profile = SimpleNamespace(nh_addr=('127.0.0.1', 5060), cli='100',
+                                  authname=None, authpass=None)
+        msg = SimpleNamespace(sip_prof=profile, conn_sip_sess_id=None,
+                              disc_cb=None, cld='200')
+        with patch.object(InfernUA, '__init__', return_value=None), \
+             patch.object(InfernUAC, 'recvEvent'), \
+             patch.object(module, 'RemoteRTPGen', return_value=SimpleNamespace(
+                 rtp_address=('127.0.0.1', 24000))):
+            ua.__init__(SimpleNamespace(rtp_actr=Mock()), msg)
+        section = ua.our_sdp_body.content.sections[0]
+        self.assertEqual(section.m_header.formats, [0, 9, 8])
+        self.assertIn('rtpmap:8 PCMA/8000', str(ua.our_sdp_body))
+
+    def test_pcma_short_tail_padding_and_marker_order(self):
+        endpoint, ring = self.make_endpoint(G711ALawCodec)
+        done = Mock()
+        endpoint.soundout(AudioChunk(torch.full((7,), .25), 8000))
+        endpoint.soundout(ASMarkerSentDoneCB(done))
+        self.tick(endpoint.writer)
+        done.assert_not_called()
+        self.assertEqual(endpoint.rserv.packets[0][12:], b'\xb5' * 7 + b'\xd5' * 153)
+        self.tick(endpoint.writer)
+        done.assert_called_once_with()
+
+    def test_pcma_receive_packets_decode_to_supplied_pcm(self):
+        endpoint, ring = self.make_endpoint(G711ALawCodec)
+        callback = Mock()
+        endpoint.connect(AudioInput(audio_in=callback))
+        endpoint.soundout(AudioChunk(torch.full((160 * 30,), .25), 8000))
+        self.tick(endpoint.writer, 30)
+        for i, packet in enumerate(endpoint.rserv.packets):
+            endpoint.rtp_received(packet, endpoint.rtp_params.rtp_target,
+                                  1_000_000_000 + i * 20_000_000)
+        vad = SimpleNamespace(input_sr=8000, window_size_samples=768, infer=Mock())
+        self.drain(ring, vad)
+        self.assertGreater(vad.infer.call_count, 0)
+        channel, chunk = vad.infer.call_args.args[0]
+        # A-law 0xb5 decodes to +8448.
+        torch.testing.assert_close(chunk.audio, torch.full((768,), 8448 / 32768))
+        channel.audio_chunk_in(chunk, True)
+        callback.assert_called_once_with(chunk=chunk)
+
+    def test_pcma_packet_loss_at_native_and_resampled_receive_rates(self):
+        for output_rate in (8000, 16000):
+            with self.subTest(output_rate=output_rate):
+                endpoint, ring = self.make_endpoint(G711ALawCodec)
+                endpoint.rtp_params.out_sr = output_rate
+                endpoint.rsess.stream_update()
+                endpoint.soundout(AudioChunk(torch.full((160 * 40,), .25), 8000))
+                self.tick(endpoint.writer, 40)
+                codec = endpoint.rsess.codec
+                original = codec.silence
+                concealed = []
+
+                def conceal(nframes):
+                    payload = original(nframes)
+                    concealed.append((nframes, payload))
+                    return payload
+
+                with patch.object(codec, 'silence', side_effect=conceal):
+                    for i, packet in enumerate(endpoint.rserv.packets):
+                        if i != 12:
+                            endpoint.rtp_received(packet, endpoint.rtp_params.rtp_target,
+                                                  1_000_000_000 + i * 20_000_000)
+                self.assertTrue(concealed)
+                for nframes, payload in concealed:
+                    self.assertEqual(payload, b'\xd5' * nframes)
+                    chunk = codec.decode(payload)
+                    self.assertEqual(chunk.samplerate, output_rate)
+                    self.assertEqual(len(chunk.audio), nframes * output_rate // 8000)
+                vad = SimpleNamespace(input_sr=8000, window_size_samples=768, infer=Mock())
+                self.drain(ring, vad)
+                self.assertGreater(vad.infer.call_count, 0)
+                for call in vad.infer.call_args_list:
+                    self.assertEqual(call.args[0][1].audio.numel(), 768)
+                    self.assertTrue(torch.isfinite(call.args[0][1].audio).all())
+
+    def test_codec_updates_switch_between_pcmu_pcma_and_g722(self):
+        endpoint, ring = self.make_endpoint()
+        for codec in (G711ALawCodec, G722Codec, G711Codec):
+            with self.subTest(codec=codec.ename):
+                old = endpoint.writer
+                params = RTPParams(('127.0.0.1', 9000), 20, out_sr=8000)
+                params.codec = codec
+                endpoint.update(params)
+                self.assertTrue(old.ended())
+                self.assertIsInstance(endpoint.writer.codec, codec)
+                self.assertIsInstance(endpoint.rsess.codec, codec)
+                endpoint.soundout(AudioChunk(torch.full((160,), .25), 8000))
+                self.tick(endpoint.writer)
+                self.assertEqual(endpoint.rserv.packets[-1][1] & 127, codec.ptype)
 
     def test_g722_packet_loss_uses_valid_silence_at_native_rate(self):
         for output_rate in (8000, 16000):

@@ -35,9 +35,7 @@ from SIP.InfernUA import InfernUA, model_body, InfernUASFailure
 from SIP.RemoteSession import RemoteSessionAccept
 from SIP.InfernSIPProfile import InfernSIPProfile
 from SIP.SipSessInfo import SipSessInfo
-# Use sippy codec directly - no dependency on local Core.Codecs
-from sippy.Rtp.Codecs.G711 import G711Codec as SippyG711Codec
-G711Codec = SippyG711Codec  # Alias for compatibility
+from sippy.Rtp.Codecs.G711 import G711Codec, G711ALawCodec
 from sippy.Rtp.Codecs.G722 import G722Codec
 
 class CCEventSentDone: pass
@@ -49,7 +47,7 @@ class InfernUAS(InfernUA):
     rsess: Optional[RemoteRTPGen] = None
     etry: Optional[CCEventTry] = None
     auto_answer: bool
-    accept_codecs = (G722Codec, G711Codec)
+    accept_codecs = (G722Codec, G711Codec, G711ALawCodec)
     def __init__(self, isip, req, sip_t, auto_answer=True):
         super().__init__(isip)
         assert sip_t.noack_cb is None

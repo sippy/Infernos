@@ -7,9 +7,7 @@ from sippy.SdpMediaDescription import a_header
 from Cluster.RemoteRTPGen import RemoteRTPGen
 from SIP.InfernUA import InfernUA, model_body
 from RTP.RTPParams import RTPParams
-# Use sippy codec directly - no dependency on local Core.Codecs
-from sippy.Rtp.Codecs.G711 import G711Codec as SippyG711Codec
-G711Codec = SippyG711Codec  # Alias for compatibility
+from sippy.Rtp.Codecs.G711 import G711Codec, G711ALawCodec
 from sippy.Rtp.Codecs.G722 import G722Codec
 from .RemoteSession import NewRemoteSessionRequest
 from .InfernUAS import InfernUAS
@@ -17,7 +15,7 @@ from .InfernSIPProfile import InfernSIPProfile
 
 class InfernUAC(InfernUA):
     uas:Optional[InfernUAS]=None
-    offer=(G711Codec, G722Codec)
+    offer=(G711Codec, G722Codec, G711ALawCodec)
     def __init__(self, isip, msg:NewRemoteSessionRequest):
         sip_prof: InfernSIPProfile = msg.sip_prof
         if msg.conn_sip_sess_id is not None:
@@ -34,6 +32,7 @@ class InfernUAC(InfernUA):
         sect = body.content.sections[0]
         sect.c_header.addr, sect.m_header.port = self.rsess.rtp_address
         sect.a_headers.insert(0, a_header(f'ptime:{rtp_params.out_ptime}'))
+        sect.m_header.formats = [codec.ptype for codec in self.offer]
         for i, codec in enumerate(self.offer):
             sect.a_headers.insert(i, a_header(codec.rtpmap()))
         self.our_sdp_body = body
