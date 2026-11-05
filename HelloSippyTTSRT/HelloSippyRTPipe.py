@@ -179,8 +179,16 @@ class HelloSippyRTPipe:
             chunker.eval()
             self.chunker = chunker
             # Load speaker embeddings using script-free loader (datasets5 compatible)
+            # Load speaker embeddings — check dimension compatibility
             self.speaker_embeddings = load_speaker_embeddings(device='cpu')
-            for x in [_x for x in (self.model.parameters, self.vocoder.parameters, self.chunker.parameters) for _x in x()] + self.speaker_embeddings: x.requires_grad = False
+            model_emb_dim = self.model.config.speaker_embedding_dim
+            loaded_emb_dim = self.speaker_embeddings[0].size(-1) if self.speaker_embeddings else 0
+            if model_emb_dim != loaded_emb_dim:
+                print(f"[HelloSippyRTPipe] WARNING: speaker embedding dimension mismatch: "
+                      f"model expects {model_emb_dim}-dim, loaded {loaded_emb_dim}-dim x-vectors. "
+                      f"Disabling get_voice/get_rand_voice for this model (manual embeddings required).")
+                self.speaker_embeddings = []
+            for x in [_x for x in (self.model.parameters, self.vocoder.parameters, self.chunker.parameters) for _x in x()]: x.requires_grad = False
             if self.model_sr != output_sr:
                 self.resampler = maybe_half(T.Resample(orig_freq=self.model_sr, new_freq=output_sr)).to(device)
             else:
@@ -258,6 +266,9 @@ class HelloSippyRTPipe:
         return True
 
     def get_rand_voice_id(self):
+        if not self.speaker_embeddings:
+            raise RuntimeError("No speaker embeddings available for this model (dimension mismatch). "
+                               "Pass speaker embeddings explicitly via HelloSippyPlayRequest.")
         return torch.randint(0, len(self.speaker_embeddings), (1,)).item()
 
     def get_rand_voice(self):
@@ -267,5 +278,8 @@ class HelloSippyRTPipe:
 
     #@lru_cache(maxsize=16)
     def get_voice(self, s_index:int):
+        if not self.speaker_embeddings:
+            raise RuntimeError("No speaker embeddings available for this model (dimension mismatch). "
+                               "Pass speaker embeddings explicitly via HelloSippyPlayRequest.")
         rv = self.speaker_embeddings[s_index]
         return rv

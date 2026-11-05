@@ -6,18 +6,13 @@ from Cluster.InfernBatchedWorker import InfernBatchedWorker
 from HelloSippyTTSRT.HelloSippyRTPipe import HelloSippyRTPipe, HelloSippyPlayRequest, \
     HelloSippyPipeState, HelloSippyPipeStateBatched
 
-def get_ja_T5Processor(device, model_name):
-    from utils.speecht5_openjtalk_tokenizer import SpeechT5OpenjtalkTokenizer
-    from transformers import SpeechT5Processor, SpeechT5FeatureExtractor
+def get_ja_T5Processor(device, model_name, config=None):
+    """Build Japanese SpeechT5 processor — delegates to corrected shared implementation.
 
-    print(f'get_ja_T5Processor: device = {device}, model_name = {model_name}')
-    tokenizer = SpeechT5OpenjtalkTokenizer.from_pretrained(model_name)
-    tokenizer._in_target_context_manager = False
-    tokenizer.split_special_tokens = True
-    tokenizer._added_tokens_encoder = {}
-    tokenizer._unk_token = None
-    feature_extractor = SpeechT5FeatureExtractor.from_pretrained(model_name)
-    return SpeechT5Processor(feature_extractor, tokenizer)
+    Signature matches HelloSippyRTPipe's get_processor(device, model, config=mc) call.
+    """
+    from utils.speecht5_openjtalk_tokenizer import get_ja_processor
+    return get_ja_processor(device, model_name, config=config)
 
 class cleanup_text_eu():
     replacements = [("Ä", "E"), ("Æ", "E"), ("Ç", "C"), ("É", "E"), ("Í", "I"), ("Ó", "O"), ("Ö", "E"), ("Ü", "Y"), ("ß", "S"),
