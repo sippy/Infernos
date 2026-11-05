@@ -3,6 +3,7 @@
 
 import weakref, uuid
 from typing import List, Optional
+from collections import namedtuple
 
 import torch
 from torch.nn import functional as F
@@ -52,6 +53,11 @@ class HelloSippyPlayRequest(SessDispatchCmd):
         self.text, self.speaker, self.dispatch = text, speaker, dispatch
         super().__init__(session_id)
 
+RowDecodeLog = namedtuple('RowDecodeLog', [
+    'session_id', 'token_count', 'cap', 'actual_steps',
+    'stop_reason', 'audio_samples'])
+_STOP_REASON_LABELS = {1: "stop_token", 2: "maxlen_reached"}
+
 def make_tensor(x): return torch.tensor([x], dtype=torch.long)
 
 def maybe_half(x): return x.to(memory_format=torch.channels_last, dtype=torch.bfloat16) if not isinstance(x, torch.Tensor) or len(x.shape) > 3 else x.to(dtype=torch.bfloat16)
@@ -72,6 +78,9 @@ class HelloSippyPipeState:
         self.session, self.dispatch = req.session, req.dispatch
         text = req.text if pp.cleanup_text is None else pp.cleanup_text(req.text)
         self.inputs = pp.processor(text=text, return_tensors="pt")["input_ids"]
+        self.token_count = self.inputs.size(1)
+        self.row_maxlen = max(1, int(self.token_count * pp.maxlenratio / pp.model.config.reduction_factor))
+        self.row_minlen = int(self.token_count * pp.minlenratio / pp.model.config.reduction_factor)
         self.speaker_embeddings = maybe_half(req.speaker)
         self.encoder_attention_mask = torch.ones_like(self.inputs, dtype=torch.int)
         self.pre_frames = maybe_half(torch.zeros(1, pp.pre_nframes + pp.post_nframes, pp.model.config.num_mel_bins))
@@ -87,8 +96,12 @@ class HelloSippyPipeStateBatched:
     pre_frames:torch.Tensor
     starts_at:torch.Tensor
     ends_at:torch.Tensor
-    minlen:int
-    maxlen:int
+    row_minlen:torch.Tensor
+    row_maxlen:torch.Tensor
+    token_counts:torch.Tensor
+    stop_reasons_codes:torch.Tensor  # 0=unset, 1=stop_token, 2=maxlen_reached
+    actual_steps:torch.Tensor
+    decode_logs:List[RowDecodeLog]
     idx: int = 0
     dispatch:List[callable]
     sessions:List[uuid.UUID]
@@ -98,6 +111,7 @@ class HelloSippyPipeStateBatched:
 
     def merge(self, states:List[HelloSippyPipeState], pp:'HelloSippyRTPipe'):
         self.dispatch = [s.dispatch for s in states]
+        self.sessions = [s.session for s in states]
         max_statelen = max([x.encoder_attention_mask.size(1) for x in states])
         for aname in ('inputs', 'speaker_embeddings', 'encoder_attention_mask', 'pre_frames', 'starts_at', 'ends_at'):
             aval = [getattr(s, aname) for s in states]
@@ -114,8 +128,23 @@ class HelloSippyPipeStateBatched:
             return_dict=True,
         )
         self.encoder_last_hidden_state = encoder_out.last_hidden_state
-        self.maxlen = int(self.encoder_last_hidden_state.size(1) * pp.maxlenratio / pp.model.config.reduction_factor)
-        self.minlen = int(self.encoder_last_hidden_state.size(1) * pp.minlenratio / pp.model.config.reduction_factor)
+        dev = pp.model.device
+        # Derive token_counts vectorized from pre-padding attention mask (ones = real tokens,
+        # zeros = padding — sum gives unpadded count)
+        self.token_counts = self.encoder_attention_mask.sum(dim=1, dtype=torch.int64).to(dev)
+        # Per-row caps via vectorized float math on model device (matches original ratio formula)
+        self.row_maxlen = torch.clamp(
+            (self.token_counts * pp.maxlenratio / pp.model.config.reduction_factor).to(torch.int64),
+            min=1).to(dev)
+        self.row_minlen = (
+            (self.token_counts * pp.minlenratio / pp.model.config.reduction_factor).to(torch.int64)
+        ).to(dev)
+        self.stop_reasons_codes = torch.zeros(
+            self.token_counts.size(0), dtype=torch.int64, device=dev)
+        self.actual_steps = torch.zeros(
+            self.token_counts.size(0), dtype=torch.int64, device=dev)
+        self.decode_logs = []
+        self.dispatched_samples = [0] * self.token_counts.size(0)
 
         # Start the output sequence with a mel spectrum that is all zeros.
         self.output_sequence = self.encoder_last_hidden_state.new_zeros(self.inputs.size(0), 1, pp.model.config.num_mel_bins)
@@ -198,6 +227,7 @@ class HelloSippyRTPipe:
     def infer(self, state:HelloSippyPipeStateBatched) -> None:
         with self.cuda_lock:
             batch_size = state.output_sequence.size(0)
+            offset = (self.pre_nframes + self.post_nframes) // self.model.config.reduction_factor
             spectrogram = maybe_half(torch.zeros(batch_size, 0, self.model.config.num_mel_bins)).to(self.model.device)
             while spectrogram.size(1) < (self.chunk_size * 4):
                 decoder_hidden_states = self.model.speecht5.decoder.prenet(state.output_sequence, state.speaker_embeddings)[:, -1:]
@@ -228,11 +258,30 @@ class HelloSippyRTPipe:
                 prob = self.model.speech_decoder_postnet.prob_out(last_decoder_output).sigmoid()
 
                 # Finished when stop token or maximum length is reached.
-                # if state.idx >= state.minlen and (int(sum(prob >= self.threshold)) > 0 or state.idx >= state.maxlen):
-                #print(f"{(state.minlen <= state.idx)=} {(torch.sum(prob >= self.threshold, (1,)) > 0)=}")
-                #raise Exception(f"{(state.maxlen <= state.idx)=}")
-                state.ends_at = torch.where((state.ends_at < 0) & (state.minlen <= state.idx) & ((torch.sum(prob >= self.threshold, (1,)) > 0) | (state.maxlen <= state.idx)),
-                                             state.idx+(self.pre_nframes+self.post_nframes)//self.model.config.reduction_factor, state.ends_at)
+                # Per-row: minlen met AND (stop_token fires OR row_maxlen reached)
+                stop_token_fired = (torch.sum(prob >= self.threshold, (1,)) > 0)
+                cap_reached = (state.row_maxlen <= state.idx)
+                minlen_met = (state.row_minlen <= state.idx)
+                should_stop = (state.ends_at < 0) & minlen_met & (stop_token_fired | cap_reached)
+
+                # Record stop reason codes vectorized (no per-row loop)
+                newly_stopped = should_stop & (state.stop_reasons_codes == 0)
+                state.stop_reasons_codes = torch.where(
+                    newly_stopped,
+                    torch.where(stop_token_fired, 1, 2),  # 1=stop_token, 2=maxlen_reached
+                    state.stop_reasons_codes)
+
+                # Update ends_at
+                state.ends_at = torch.where(should_stop,
+                                             state.idx + offset, state.ends_at)
+
+                # Update actual_steps for rows that just stopped
+                newly_stopped = should_stop & (state.actual_steps == 0)
+                state.actual_steps = torch.where(newly_stopped, state.idx, state.actual_steps)
+
+                # All rows ended — drain context by continuing (no break)
+                # idx must keep incrementing so unbatch_and_dispatch EOS condition
+                # (ends_at <= idx-1) is satisfied after this cycle.
                 state.idx += 1
             spectrogram = self.model.speech_decoder_postnet.postnet(spectrogram)
             spectrogram = torch.cat((state.pre_frames, spectrogram), dim=1)
@@ -250,16 +299,34 @@ class HelloSippyRTPipe:
         audio, sr_rr = state.audio, self.model_sr // self.output_sr
         end_idx = state.idx - 1
         stepsize = 256 * 2 // sr_rr
+        batch_size = state.inputs.size(0)
         with self.cuda_lock:
             for i, dispatch in [(i, _cbq) for i, _cbq in enumerate(state.dispatch) if _cbq is not None]:
-                startoff = max(0, (asize:=audio[i].size(0)) - ((state.idx - state.starts_at[i].item()) * stepsize))
-                endoff = min(asize, asize - (((state.idx - ends_at) * stepsize) if (ends_at:=state.ends_at[i].item()) >=0 else 0))
+                starts_at_i = state.starts_at[i].item()
+                ends_at_i = state.ends_at[i].item()
+                asize = audio[i].size(0)
+                startoff = max(0, asize - ((state.idx - starts_at_i) * stepsize))
+                endoff = min(asize, asize - (((state.idx - ends_at_i) * stepsize) if ends_at_i >= 0 else 0))
                 assert startoff <= endoff
                 if startoff != endoff:
-                    dispatch(audio[i][startoff:endoff].cpu())
-                if ends_at >= 0 and ends_at <= end_idx:
+                    dispatched_chunk = audio[i][startoff:endoff].cpu()
+                    dispatch(dispatched_chunk)
+                    state.dispatched_samples[i] += dispatched_chunk.size(0)
+                if ends_at_i >= 0 and ends_at_i <= end_idx:
                     dispatch(None)
                     state.dispatch[i] = None
+                    # Log completed row exactly once (EOS dispatched once)
+                    reason_code = state.stop_reasons_codes[i].item()
+                    log = RowDecodeLog(
+                        session_id=state.sessions[i],
+                        token_count=state.token_counts[i].item(),
+                        cap=state.row_maxlen[i].item(),
+                        actual_steps=state.actual_steps[i].item(),
+                        stop_reason=_STOP_REASON_LABELS.get(reason_code, "maxlen_reached"),
+                        audio_samples=state.dispatched_samples[i],
+                    )
+                    state.decode_logs.append(log)
+
             mask = ((state.ends_at < 0) | (state.ends_at > end_idx))
             if torch.all(~mask):
                 return False

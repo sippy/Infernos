@@ -85,6 +85,13 @@ class InfernTTSWorker(InfernBatchedWorker):
                 self.handle_runtime_error(e, wis, state)
                 raise
             if not self.tts_engine.unbatch_and_dispatch(state): break
+        # Log summary for the batch (single aggregated debug print)
+        if self.debug and state.decode_logs:
+            parts = "; ".join(
+                f"sess={log.session_id} tok={log.token_count} cap={log.cap} "
+                f"actual={log.actual_steps} {log.stop_reason} samples={log.audio_samples}"
+                for log in state.decode_logs)
+            print(f"[TTS-Batch] {parts}")
 
     def handle_runtime_error(self, e, state, wis:List[HelloSippyPlayRequest]):
         print(f'InfernTTSWorker.handle_runtime_error: {e}')
