@@ -14,6 +14,7 @@ from Cluster.STTSession import STTResult
 from SIP.RemoteSession import RemoteSessionOffer
 from Core.T2T.NumbersToWords import NumbersToWords
 from Core.Exceptions.InfernSessNotFoundErr import InfernSessNotFoundErr
+from Core.Exceptions.InfernSessRejectedErr import InfernSessRejectedErr
 
 from .LTSession import LTSession, VADSignals
 
@@ -67,7 +68,11 @@ class LTActor():
     def new_sip_session_received(self, new_sess:RemoteSessionOffer):
         if self.vds is None:
             self.vds = VADSignals()
-        lt_sess = LTSession(self, new_sess)
+        try:
+            lt_sess = LTSession(self, new_sess)
+        except InfernSessRejectedErr as e:
+            print(f'Session not started: {e}')
+            return
         print(f'{lt_sess=}')
         self.sessions[lt_sess.id] = lt_sess
 

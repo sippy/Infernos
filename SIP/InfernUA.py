@@ -53,15 +53,14 @@ body_txt = 'v=0\r\n' + \
 model_body = MsgBody(body_txt)
 model_body.parse()
 
-class InfernUASFailure(CCEventFail):
-    default_code = 488
-    _code_msg = {default_code : 'Not Acceptable Here',
-                 500          : 'Server Internal Error'}
-    def __init__(self, reason=None, code=default_code):
-        self.code, self.msg = code, self._code_msg[code]
-        super().__init__((self.code, self.msg))
-        self.reason = SipReason(protocol='SIP', cause=self.code,
-                                reason=reason)
+_uas_failure_msgs = {488: 'Not Acceptable Here', 500: 'Server Internal Error'}
+
+def uas_failure(reason=None, code=488) -> CCEventFail:
+    # This has to be a plain CCEventFail: sippy's UA states look up their
+    # handlers by exact event class and silently drop any subclass.
+    event = CCEventFail((code, _uas_failure_msgs[code]))
+    event.reason_rfc3326 = SipReason(protocol='SIP', cause=code, reason=reason)
+    return event
 
 class InfernUA(UA):
     debug = True
@@ -83,7 +82,7 @@ class InfernUA(UA):
         if accept is None:
             accept = getattr(self, 'accept_codecs', getattr(self, 'offer', (G711Codec,)))
         if sdp_body == None:
-            event = InfernUASFailure("late offer/answer is not supported at this time, sorry")
+            event = uas_failure("late offer/answer is not supported at this time, sorry")
             self.recvEvent(event)
             return
         sdp_body.parse()
@@ -91,7 +90,7 @@ class InfernUA(UA):
             codec, sect = next((ac, s) for ac in accept for s in sdp_body.content.sections
                                 if s.m_header.type == MTAudio and ac.ptype in s.m_header.formats)
         except StopIteration:
-            event = InfernUASFailure("Unsupported audio codec, sorry")
+            event = uas_failure("Unsupported audio codec, sorry")
             self.recvEvent(event)
             return None
         try:

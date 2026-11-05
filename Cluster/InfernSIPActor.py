@@ -8,6 +8,7 @@ import ray
 from SIP.InfernSIP import InfernSIP
 from SIP.RemoteSession import RemoteSessionAccept, NewRemoteSessionRequest
 from Cluster.InfernRTPActor import InfernRTPActor
+from Core.Exceptions.InfernSessRejectedErr import InfernSessRejectedErr
 
 @ray.remote(resources={"head": 0.5})
 class InfernSIPActor():
@@ -39,6 +40,9 @@ class InfernSIPActor():
         rval = Queue()
         ED2.callFromThread(sip_sess.accept, msg, rval)
         rtp_sess = rval.get()
+        if rtp_sess is None:
+            # The UAS has already sent the final failure response to the caller.
+            raise InfernSessRejectedErr(f'SIP session {sip_sess_id} failed media negotiation')
         return (self.rtp_actr, rtp_sess.sess_id)
 
     def new_sess_reject(self, sip_sess_id):

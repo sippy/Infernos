@@ -28,10 +28,12 @@ from uuid import uuid4, UUID
 from queue import Queue
 
 from sippy.CCEvents import CCEventTry, CCEventConnect
+from sippy.Core.Exceptions import dump_exception
 from sippy.SdpMediaDescription import a_header
+from sippy.UasStateIdle import UasStateIdle
 
 from Cluster.RemoteRTPGen import RemoteRTPGen, RTPGenError
-from SIP.InfernUA import InfernUA, model_body, InfernUASFailure
+from SIP.InfernUA import InfernUA, model_body, uas_failure
 from SIP.RemoteSession import RemoteSessionAccept
 from SIP.InfernSIPProfile import InfernSIPProfile
 from SIP.SipSessInfo import SipSessInfo
@@ -64,14 +66,13 @@ class InfernUAS(InfernUA):
         cId, cli, cld, sdp_body, auth, caller_name = event.getData()
         rtp_params = self.extract_rtp_params(sdp_body, accept=self.accept_codecs)
         if rtp_params is None:
-            event = InfernUASFailure(code=500)
-            self.recvEvent(event)
+            # extract_rtp_params() has already failed the call with a 488.
             return
 
         try:
             self.rsess = RemoteRTPGen(self.rtp_actr, rtp_params)
         except RTPGenError as e:
-            event = InfernUASFailure(code=500, reason=str(e))
+            event = uas_failure(code=500, reason=str(e))
             self.recvEvent(event)
             raise e
         self.disc_cbs = (self.sess_term,)
@@ -103,13 +104,38 @@ class InfernLazyUAS(InfernUAS):
         sip_stack.sippy_c['_sip_tm'].sendResponse(resp)
 
     def accept(self, rsa:RemoteSessionAccept, rval:Queue):
-        self._sip_t.cancel_cb = None
-        super().__init__(self._sip_stack, self._req, self._sip_t, rsa.auto_answer)
-        self.id = self._id
-        del self._sip_stack, self._req, self._sip_t, self._id
-        if rsa.disc_cb is not None:
-            self.disc_cbs += (rsa.disc_cb,)
-        rval.put(self.rsess)
+        # new_sess_accept() blocks on rval and ED2 swallows anything raised here,
+        # so every path out of this method has to deliver a result.
+        if not hasattr(self, '_sip_t'):
+            # CANCEL or reject() got here first, the INVITE is already answered.
+            rval.put(None)
+            return
+        rsess = None
+        sess_id = self.id
+        try:
+            self._sip_t.cancel_cb = None
+            super().__init__(self._sip_stack, self._req, self._sip_t, rsa.auto_answer)
+            if rsa.disc_cb is not None:
+                self.disc_cbs += (rsa.disc_cb,)
+            rsess = self.rsess
+        except Exception:
+            dump_exception('InfernLazyUAS: accept() failed')
+            self._fail_accept()
+        finally:
+            self.id = sess_id
+            for attr in ('_sip_stack', '_req', '_sip_t', '_id'):
+                self.__dict__.pop(attr, None)
+            rval.put(rsess)
+
+    def _fail_accept(self):
+        if self.state is None or isinstance(self.state, UasStateIdle):
+            # The UA has not taken over the INVITE, so it can't fail it either.
+            resp = self._req.genResponse(500, 'Server Internal Error')
+            self._sip_stack.sippy_c['_sip_tm'].sendResponse(resp)
+            return
+        # No-op if outEvent() has failed the call already: UaStateFailed ignores it.
+        self.recvEvent(uas_failure('Session setup failed', code=500))
+        self.sess_term(self)
 
     def reject(self):
         resp = self._req.genResponse(666, 'OOPS')

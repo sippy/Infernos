@@ -16,6 +16,7 @@ from Cluster.LLMSession import LLMResult
 from SIP.RemoteSession import RemoteSessionOffer
 from Core.T2T.NumbersToWords import NumbersToWords
 from Core.Exceptions.InfernSessNotFoundErr import InfernSessNotFoundErr
+from Core.Exceptions.InfernSessRejectedErr import InfernSessRejectedErr
 
 from .AIASession import AIASession
 from ..LiveTranslator.LTActor import ntw_filter
@@ -55,7 +56,11 @@ class AIAActor():
         self.thumbstones = []
 
     def new_sip_session_received(self, new_sess:RemoteSessionOffer):
-        aia_sess = AIASession(self, new_sess, self.aia_prof.llm_prompt)
+        try:
+            aia_sess = AIASession(self, new_sess, self.aia_prof.llm_prompt)
+        except InfernSessRejectedErr as e:
+            print(f'Session not started: {e}')
+            return
         print(f'{aia_sess=}')
         self.sessions[aia_sess.id] = aia_sess
 

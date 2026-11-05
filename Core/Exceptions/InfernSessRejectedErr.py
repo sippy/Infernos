@@ -1,0 +1,1 @@
+class InfernSessRejectedErr(Exception): pass

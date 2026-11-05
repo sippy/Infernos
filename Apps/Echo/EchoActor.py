@@ -9,6 +9,7 @@ from Cluster.InfernSTTActor import InfernSTTActor
 from Cluster.InfernTTSActor import InfernTTSActor
 from config.InfernGlobals import InfernGlobals as IG
 from Core.Exceptions.InfernSessNotFoundErr import InfernSessNotFoundErr
+from Core.Exceptions.InfernSessRejectedErr import InfernSessRejectedErr
 from .EchoSession import EchoSession
 
 log = logging.getLogger(__name__)
@@ -44,6 +45,10 @@ class EchoActor:
         self.sessions[session.id] = session
         try:
             session.start(new_sess)
+        except InfernSessRejectedErr as e:
+            # An expected call outcome: SIP has already answered the caller.
+            log.info('Echo session %s not started: %s', session.id, e)
+            self.sess_term(session.id, None, relaxed=True)
         except Exception:
             log.exception('Could not start Echo session %s', session.id)
             self.sess_term(session.id, None, relaxed=True)
