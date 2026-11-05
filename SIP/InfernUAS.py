@@ -52,9 +52,9 @@ class InfernUAS(InfernUA):
         super().__init__(isip)
         assert sip_t.noack_cb is None
         self.auto_answer = auto_answer
-        sip_t.noack_cb = self.sess_term
 #        self.prompts = isip.getPrompts()
-        self.recvRequest(req, sip_t)
+        # We are past SipTransactionManager's own handling of the return value.
+        _, sip_t.cancel_cb, sip_t.noack_cb = self.recvRequest(req, sip_t)
 
     def outEvent(self, event, ua):
         if not isinstance(event, CCEventTry):
